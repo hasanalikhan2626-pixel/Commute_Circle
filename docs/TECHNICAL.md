@@ -1,5 +1,7 @@
 # CommuteCircle: Technical Documentation (MVP, Week 9)
 
+_Version 1.1. Campus: BIC Karachi, 273/1/A Main Ibrahim Hyderi Road, Korangi Creek, Karachi 75190._
+
 ## 1. Overview
 
 CommuteCircle is a web application that groups BIC Karachi students into carpool
@@ -27,21 +29,32 @@ React SPA (Vite)  ──HTTPS/JSON──▶  FastAPI  ──SQLAlchemy──▶ 
 * **Deployment.** In production, FastAPI serves the built frontend from `frontend/dist`,
   so the whole app is one process behind one origin (no CORS needed).
 * **Configuration** comes from `CC_*` environment variables (`backend/app/config.py`):
-  `CC_SECRET_KEY`, `CC_DATABASE_URL`, `CC_EMAIL_DOMAINS`, `CC_CAMPUS_LAT/LNG`,
-  `CC_FUEL_PRICE_PKR`, `CC_FUEL_KM_PER_LITRE`, `CC_CORS_ORIGINS`.
+
+  | Variable | Default | Notes |
+  |---|---|---|
+  | `CC_ENV` | development | `production` turns on the safety checks below |
+  | `CC_SECRET_KEY` | dev value | ≥ 32 random characters in production |
+  | `CC_DATABASE_URL` | SQLite file | PostgreSQL required in production; `postgres://` URLs accepted |
+  | `CC_EMAIL_DOMAINS` | bic.edu.pk | Only these domains can register |
+  | `CC_CAMPUS_LAT/LNG` | 24.7990, 67.1330 | Approximate (~1 km) position of Ibrahim Hyderi Road, Korangi Creek; refine with a map pin |
+  | `CC_FUEL_PRICE_PKR` | 352.59 | Petrol price per litre |
+  | `CC_FUEL_KM_PER_LITRE` | 12 | Average car efficiency |
+
+  In production the app **refuses to start** with a weak secret key, SQLite, or no email
+  domain, hides the Swagger docs, and the seed script refuses to run (it would wipe real data).
 
 ## 3. Data model
 
 | Table | Purpose | Key fields |
 |---|---|---|
-| `users` | Accounts | email (unique), password_hash (bcrypt), role, phone (normalised +92…), is_active |
+| `users` | Accounts | email (unique), password_hash (bcrypt), role, phone (normalised +92…), is_active, consented_at, consent_version, research_consent |
 | `profiles` | Commute preferences, **only edited by the student** | area, pickup_landmark, gender, same_gender_only, has_car, seats, schedule (JSON per day), seeking |
 | `circles` | A carpool group | status (proposed/active/dissolved), algorithm, score, dissolved_reason |
 | `circle_members` | Membership | is_driver, status (pending/accepted/declined/left) |
 | `rota_entries` | Who drives which day | day, driver_id, arrive |
 | `driver_unavailability` | Days a driver can't drive | circle_id, user_id, day |
 | `declined_pairs` | Pairs never to propose again | user_id, other_id |
-| `reports` | Safety reports | reason, details, status, admin_note |
+| `reports` | Safety reports | reason, details, status, admin_note; reporter/reported set to NULL if an account is deleted |
 | `match_runs` | Audit log and research data for every run | algorithm, pool_size, metrics (JSON) |
 
 **Privacy by design.** No home address or GPS coordinates are stored. Students choose
@@ -93,18 +106,37 @@ All three are deterministic for a given seed.
 Match rate, number and size of circles, mean compatibility, mean detour, mean shared
 days, and estimated weekly km, fuel (PKR) and CO₂ saved compared with everyone driving alone.
 
-### 5.5 Preliminary results (60 synthetic students, seed 0)
+### 5.5 Preliminary results (synthetic data)
 
-| Algorithm | Match rate | Circles | Avg compatibility | Avg detour km | Fuel saved / week |
-|---|---|---|---|---|---|
-| Greedy | 65.0% | 11 | 0.716 | 3.22 | PKR 21,929 |
-| k-means | 43.3% | 7 | **0.782** | **2.03** | PKR 16,819 |
-| Compatibility | **68.3%** | 13 | 0.723 | 2.72 | PKR 21,211 |
+`python -m app.benchmark` generates 5 independent synthetic pools at each size (campus
+at Korangi Creek, south-east areas weighted as most common) and reports mean ± SD.
+The raw output is in `docs/benchmark-synthetic.csv`.
 
-The proposed method places the most students. k-means makes the tightest circles but
-leaves many students unmatched, because grouping by geography alone ignores
-timetables. These numbers come from synthetic data and must be re-run on real
-(consented) student data for the final evaluation.
+| Pool | Algorithm | Match rate | Avg compatibility | Avg detour km | Fuel saved PKR/wk | Runtime ms |
+|---|---|---|---|---|---|---|
+| 60 | Greedy | 64.7% ± 6.6 | 0.674 ± 0.029 | 2.86 ± 0.57 | 30,212 ± 8,446 | 5 |
+| 60 | k-means | 45.3% ± 4.3 | **0.728** ± 0.044 | **2.19** ± 0.60 | 22,674 ± 5,843 | 9 |
+| 60 | Compatibility | **66.0%** ± 8.0 | 0.653 ± 0.036 | 3.30 ± 0.37 | **31,943** ± 7,990 | 13 |
+| 200 | Greedy | **83.4%** ± 2.2 | 0.727 ± 0.020 | 2.94 ± 0.20 | 148,218 ± 9,447 | 32 |
+| 200 | k-means | 74.0% ± 4.7 | **0.762** ± 0.019 | **1.62** ± 0.36 | 143,981 ± 17,227 | 253 |
+| 200 | Compatibility | 79.3% ± 2.8 | 0.726 ± 0.025 | 2.78 ± 0.06 | **153,971** ± 19,031 | 127 |
+
+**Interpretation.**
+* The proposed compatibility method **does not yet beat the greedy baseline** on match
+  rate. At 60 students the difference (66.0% vs 64.7%) is well inside one standard
+  deviation. At 200 students greedy is ahead by about 4 points.
+* k-means produces the tightest, most compatible circles with the shortest detours,
+  but leaves the most students unmatched, because it groups by geography before
+  looking at timetables.
+* There is a clear trade-off between *coverage* (match rate) and *quality*
+  (compatibility, detour). No method wins on both.
+* These are synthetic pools. The final evaluation must be re-run on the real,
+  consented student data via the research export (Section 9a).
+
+**Next steps for the research component:** a local-search improvement pass for the
+compatibility method (move or swap students between circles while the objective
+improves); an exact integer-programming solution on small pools as an upper bound;
+and a significance test (paired, across datasets) before claiming any method is better.
 
 ## 6. Driving rota (`services/rota.py`)
 For each shared day in the next 14 days, the rota picks the available driver with the
@@ -136,6 +168,19 @@ Interactive OpenAPI docs: `http://localhost:8000/docs`.
 | POST | /api/admin/circles/{id}/dissolve | admin | Dissolve |
 | PATCH | /api/admin/reports/{id}, /api/admin/users/{id} | admin | Resolve report, suspend |
 
+## 9a. Personal data, consent and research use
+
+Real student data is collected, so the system implements:
+
+| Requirement | Implementation |
+|---|---|
+| Informed consent | Registration requires agreeing to the privacy notice (`/privacy`); time and notice version are stored |
+| Separate research consent | Optional checkbox at sign-up, changeable any time on the Account page |
+| Data minimisation | Area instead of address; no GPS; landmark and phone optional |
+| Right of access | Account > *Download my data* (`GET /api/auth/me/export`, JSON) |
+| Right to erasure | Account > *Delete my account* (password confirmed): leaves the circle, deletes all personal records; safety reports are kept but unlinked |
+| Pseudonymised research data | `GET /api/admin/research-export` (CSV): **only** students who opted in; no name, email, phone or landmark; IDs are HMAC-SHA256 hashes keyed by the server secret |
+
 ## 9. Security
 * Passwords hashed with bcrypt; JWT (HS256) bearer tokens expire after 12 hours.
 * Registration can be restricted to campus email domains (`CC_EMAIL_DOMAINS`).
@@ -144,6 +189,10 @@ Interactive OpenAPI docs: `http://localhost:8000/docs`.
   can only report people they have shared a circle with; admin routes check the role.
 * All input is validated with Pydantic: times, day names, areas, seats, and phone format.
 * Suspending a user signs them out and removes them from their circle immediately.
+* Security headers on every response: `X-Content-Type-Options`, `X-Frame-Options: DENY`,
+  `Referrer-Policy`, and HSTS in production. The container runs as a non-root user.
+* Admin accounts are created with `python -m app.create_admin` (password ≥ 12 characters),
+  never through the public sign-up.
 
 ## 10. Fixes to the original prototype
 | Prototype issue | Resolution | Regression test |
@@ -153,7 +202,8 @@ Interactive OpenAPI docs: `http://localhost:8000/docs`.
 | Inconsistent phone formats | Normalised to +923XXXXXXXXX | `test_phone_normalised` |
 
 ## 11. Testing
-`backend/tests/` holds 47 automated tests:
+`backend/tests/` holds 54 automated tests. They run on **both SQLite and PostgreSQL 16**
+(GitHub Actions runs both on every push):
 * **Matching engine (34):** every algorithm is checked over 5 random pools of 50
   students. No circle may break a hard constraint, no student may appear twice, and
   every student must be accounted for. The tests also cover determinism and edge
@@ -161,9 +211,16 @@ Interactive OpenAPI docs: `http://localhost:8000/docs`.
 * **API journeys (13):** registration validation, throttling, the full accept flow,
   decline handling, a driver leaving, privacy, rota fairness, reassignment when a
   driver is unavailable, suspension, reports, and the dry-run compare.
+* **Personal data (7):** consent is required, the research toggle, data export,
+  account deletion (circle survives, report is unlinked), the research CSV
+  (opted-in students only, no identifiers), database URL handling, and production
+  configuration guards.
 
-A browser walkthrough (admin compares, then runs matching, then every member accepts)
-ran in Chromium with no console errors. Screenshots are in `docs/screenshots/`.
+Two browser walkthroughs ran in Chromium with no console errors: (1) the admin
+compares algorithms and runs matching, then every member accepts; (2) on the
+production configuration with PostgreSQL, a student signs up with consent, sets up a
+Korangi Creek profile, downloads their data, the admin downloads the research CSV, and
+the student deletes their account. Screenshots are in `docs/screenshots/`.
 
 ## 12. Known limitations and next steps (to the final build)
 * Distances use straight-line distance between area centroids. Next step: a road-distance
@@ -172,4 +229,7 @@ ran in Chromium with no console errors. Screenshots are in `docs/screenshots/`.
 * No email verification or notifications yet. Next steps: an email OTP at registration,
   then email or WhatsApp alerts when a circle is proposed.
 * No database migrations yet. Add Alembic before the schema changes in production.
-* Campus coordinates, fuel price and the email domain are placeholders to confirm.
+* Campus coordinates are approximate (~1 km); confirm them with a map pin.
+* The proposed algorithm needs the improvements listed in Section 5.5.
+* The Docker image could not be built in the development sandbox (Docker Hub rate
+  limit). It builds on Render and GitHub Actions; check the first deploy log.

@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import csv
+import hashlib
+import hmac
+import io
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..deps import admin_user
 from ..matching.algorithms import ALGORITHMS
+from ..matching.compat import DAYS
 from ..matching.evaluate import evaluate
 from ..config import settings
 from ..models import Circle, CircleMember, CircleStatus, MatchRun, MemberStatus, Profile, Report, ReportStatus, User
@@ -125,3 +132,33 @@ def update_user(user_id: int, body: AdminUserUpdate, db: Session = Depends(get_d
                 svc.leave(db, m.circle, u.id)
     db.commit()
     return user_out(u)
+
+
+def _pseudonym(kind: str, i: int) -> str:
+    return hmac.new(settings.secret_key.encode(), f"{kind}:{i}".encode(), hashlib.sha256).hexdigest()[:10]
+
+
+@router.get("/research-export")
+def research_export(db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    """Pseudonymised CSV of students who opted in to research use.
+
+    No names, emails, phones or landmarks. IDs are keyed hashes, stable across exports
+    while CC_SECRET_KEY is unchanged, but not reversible without it.
+    """
+    live = {}
+    for m in db.scalars(select(CircleMember).join(Circle).where(
+            Circle.status == CircleStatus.active, CircleMember.status == MemberStatus.accepted)):
+        live[m.user_id] = m.circle_id
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["pid", "area", "gender", "same_gender_only", "has_car", "seats", "days_per_week",
+                *[f"{d}_arrive" for d in DAYS], "seeking", "in_active_circle", "circle_pid"])
+    q = select(Profile).join(User).where(User.research_consent.is_(True), User.is_active.is_(True))
+    for p in db.scalars(q.order_by(Profile.user_id)):
+        sched = p.schedule or {}
+        cid = live.get(p.user_id)
+        w.writerow([_pseudonym("u", p.user_id), p.area, p.gender.value, int(p.same_gender_only), int(p.has_car),
+                    p.seats, len(sched), *[sched.get(d, {}).get("arrive", "") for d in DAYS], int(p.seeking),
+                    int(cid is not None), _pseudonym("c", cid) if cid else ""])
+    return Response(buf.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=commutecircle-research.csv"})

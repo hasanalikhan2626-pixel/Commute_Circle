@@ -1,0 +1,26 @@
+# Render blueprint: New > Blueprint > pick this repo.
+# Database: create a free PostgreSQL project on neon.tech and paste its connection
+# string into CC_DATABASE_URL when Render asks (Render's own free Postgres expires after 30 days).
+services:
+  - type: web
+    name: commutecircle
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: CC_ENV
+        value: production
+      - key: CC_SECRET_KEY
+        generateValue: true
+      - key: CC_DATABASE_URL
+        sync: false
+      - key: CC_EMAIL_DOMAINS
+        value: bic.edu.pk
+      - key: CC_CORS_ORIGINS
+        value: https://commutecircle.onrender.com
+      - key: CC_CAMPUS_LAT
+        value: "24.7990"
+      - key: CC_CAMPUS_LNG
+        value: "67.1330"
+      - key: CC_FUEL_PRICE_PKR
+        value: "352.59"

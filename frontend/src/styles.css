@@ -115,3 +115,11 @@ small, .small { font-size: .85rem; }
   .nav { order: 3; flex-basis: 100%; }
   .table th, .table td { padding: .5rem .4rem; }
 }
+h3 { font-size: .95rem; margin: .6rem 0 0; }
+.card ul { margin: .2rem 0; padding-left: 1.2rem; }
+.consent { display: flex; flex-direction: column; gap: .5rem; font-size: .9rem; }
+.consent label.check { align-items: flex-start; }
+.consent input { margin-top: .25rem; }
+.btn-danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+.btn-danger:hover { background: var(--bad); filter: brightness(1.08); }
+.danger-zone { border: 1px solid var(--bad); border-radius: 10px; padding: .8rem; background: var(--bad-soft); }

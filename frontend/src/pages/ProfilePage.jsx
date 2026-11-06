@@ -16,8 +16,9 @@ export default function ProfilePage() {
 
   useEffect(() => {
     api('/api/meta').then(setMeta)
-    api('/api/profile').then((d) => setP({ ...EMPTY, ...d, pickup_landmark: d.pickup_landmark || '' }))
-      .catch(() => setP({ ...EMPTY, schedule: { mon: { arrive: '08:30', leave: '14:30' } } }))
+    api('/api/profile').then((d) => setP(d
+      ? { ...EMPTY, ...d, pickup_landmark: d.pickup_landmark || '' }
+      : { ...EMPTY, schedule: { mon: { arrive: '08:30', leave: '14:30' } } }))
   }, [])
 
   if (!meta || !p) return <Spinner />

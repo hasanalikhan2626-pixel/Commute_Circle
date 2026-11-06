@@ -5,6 +5,7 @@ import AuthPage from './pages/AuthPage'
 import ProfilePage from './pages/ProfilePage'
 import CirclePage from './pages/CirclePage'
 import AccountPage from './pages/AccountPage'
+import PrivacyPage from './pages/PrivacyPage'
 import AdminDashboard from './pages/admin/Dashboard'
 import AdminMatching from './pages/admin/Matching'
 import AdminCircles from './pages/admin/Circles'
@@ -36,7 +37,7 @@ function Shell({ children }) {
 export default function App() {
   const { user } = useAuth()
   if (user === undefined) return <div className="center"><Spinner /></div>
-  if (!user) return <Routes><Route path="*" element={<AuthPage />} /></Routes>
+  if (!user) return <Routes><Route path="/privacy" element={<PrivacyPage standalone />} /><Route path="*" element={<AuthPage />} /></Routes>
 
   if (user.role === 'admin') {
     return (
@@ -58,6 +59,7 @@ export default function App() {
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/circle" element={user.has_profile ? <CirclePage /> : <Navigate to="/profile" replace />} />
         <Route path="/account" element={<AccountPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="*" element={<Navigate to={user.has_profile ? '/circle' : '/profile'} replace />} />
       </Routes>
     </Shell>

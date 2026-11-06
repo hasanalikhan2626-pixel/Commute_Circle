@@ -22,7 +22,7 @@ def test_phone_normalised(client):
 
 def test_duplicate_email(client):
     register(client, 1)
-    r = client.post("/api/auth/register", json={"email": "S1@bic.edu.pk", "password": "password123", "full_name": "Dup User"})
+    r = client.post("/api/auth/register", json={"email": "S1@bic.edu.pk", "password": "password123", "full_name": "Dup User", "consent": True})
     assert r.status_code == 409
 
 

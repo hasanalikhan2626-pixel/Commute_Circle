@@ -31,6 +31,15 @@ class RegisterIn(BaseModel):
     password: str = Field(min_length=8, max_length=128)
     full_name: str = Field(min_length=2, max_length=120)
     phone: str | None = None
+    consent: bool = Field(default=False, validate_default=True)  # agreed to the privacy notice
+    research_consent: bool = False
+
+    @field_validator("consent")
+    @classmethod
+    def must_consent(cls, v: bool) -> bool:
+        if not v:
+            raise ValueError("You must agree to the privacy notice to use CommuteCircle")
+        return v
 
     @field_validator("email")
     @classmethod
@@ -54,6 +63,7 @@ class RegisterIn(BaseModel):
 class UserUpdate(BaseModel):
     full_name: str | None = Field(default=None, min_length=2, max_length=120)
     phone: str | None = None
+    research_consent: bool | None = None
 
     @field_validator("phone")
     @classmethod
@@ -74,6 +84,7 @@ class UserOut(BaseModel):
     phone: str | None
     role: Role
     is_active: bool
+    research_consent: bool = False
     has_profile: bool = False
 
 
@@ -193,8 +204,8 @@ class ReportIn(BaseModel):
 class ReportOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    reporter_id: int
-    reported_id: int
+    reporter_id: int | None
+    reported_id: int | None
     circle_id: int | None
     reason: str
     details: str
@@ -232,3 +243,7 @@ class DissolveIn(BaseModel):
 
 class AdminUserUpdate(BaseModel):
     is_active: bool
+
+
+class DeleteAccountIn(BaseModel):
+    password: str

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { api, pkr } from '../../api'
+import { api, pkr, token } from '../../api'
 import { Alert, Card, Spinner, useLoad } from '../../components/ui'
 
 const ALGOS = {
@@ -40,6 +40,13 @@ export default function Matching() {
       setCmp(null); reloadRuns()
     } catch (e) { setMsg({ err: e.message }) } finally { setBusy(false) }
   }
+  const exportCsv = async () => {
+    const res = await fetch('/api/admin/research-export', { headers: { Authorization: `Bearer ${token.get()}` } })
+    if (!res.ok) { setMsg({ err: 'Export failed' }); return }
+    const url = URL.createObjectURL(await res.blob())
+    Object.assign(document.createElement('a'), { href: url, download: 'commutecircle-research.csv' }).click()
+    URL.revokeObjectURL(url)
+  }
   const best = (key, dir) => cmp && (dir === 'min' ? Math.min : Math.max)(...cmp.map((r) => r[key]))
 
   return (
@@ -52,6 +59,7 @@ export default function Matching() {
           </select>
           <button className="btn" onClick={compare} disabled={busy}>Compare algorithms (dry run)</button>
           <button className="btn btn-primary" onClick={run} disabled={busy}>Create circles</button>
+          <button className="btn btn-ghost" onClick={exportCsv}>Download research export (CSV)</button>
         </div>
         <Alert kind="ok">{msg.ok}</Alert><Alert>{msg.err}</Alert>
       </Card>

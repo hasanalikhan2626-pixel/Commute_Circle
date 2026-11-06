@@ -54,9 +54,13 @@ class User(Base):
     role: Mapped[Role] = mapped_column(Enum(Role), default=Role.student)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # Consent to the privacy notice (required) and to research use (optional, separate).
+    consented_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consent_version: Mapped[str | None] = mapped_column(String(20))
+    research_consent: Mapped[bool] = mapped_column(Boolean, default=False)
 
     profile: Mapped[Profile | None] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
-    memberships: Mapped[list[CircleMember]] = relationship(back_populates="user")
+    memberships: Mapped[list[CircleMember]] = relationship(back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
 
 
 class Profile(Base):
@@ -138,8 +142,9 @@ class Report(Base):
     __tablename__ = "reports"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    reporter_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    reported_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    # SET NULL: safety records outlive a deleted account, without identifying it.
+    reporter_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    reported_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     circle_id: Mapped[int | None] = mapped_column(ForeignKey("circles.id", ondelete="SET NULL"))
     reason: Mapped[str] = mapped_column(String(60))
     details: Mapped[str] = mapped_column(Text, default="")

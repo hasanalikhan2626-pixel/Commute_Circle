@@ -17,13 +17,28 @@ STATIC = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    settings.check()
     Base.metadata.create_all(engine)
     yield
 
 
-app = FastAPI(title="CommuteCircle API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="CommuteCircle API", version="1.1.0", lifespan=lifespan,
+              docs_url=None if settings.production else "/docs", redoc_url=None)
 app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_credentials=True,
                    allow_methods=["*"], allow_headers=["*"])
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    resp = await call_next(request)
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    if settings.production:
+        resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return resp
+
+
 for r in (auth.router, meta.router, profile.router, circles.router, admin.router):
     app.include_router(r)
 

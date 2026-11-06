@@ -1,6 +1,6 @@
 import os
 
-os.environ["CC_DATABASE_URL"] = "sqlite://"
+os.environ.setdefault("CC_DATABASE_URL", "sqlite://")
 os.environ["CC_EMAIL_DOMAINS"] = "bic.edu.pk"
 
 import pytest  # noqa: E402
@@ -38,6 +38,7 @@ def db():
 def register(client, n, **profile):
     r = client.post("/api/auth/register", json={
         "email": f"s{n}@bic.edu.pk", "password": "password123", "full_name": f"Student {n}", "phone": "0300 1234567",
+        "consent": True, "research_consent": n % 2 == 0,
     })
     assert r.status_code == 201, r.text
     h = {"Authorization": f"Bearer {r.json()['access_token']}"}

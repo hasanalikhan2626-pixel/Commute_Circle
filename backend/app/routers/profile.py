@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from ..db import get_db
@@ -12,11 +12,10 @@ from ..services.circles import refresh_after_profile_change
 router = APIRouter(prefix="/api/profile", tags=["profile"])
 
 
-@router.get("", response_model=ProfileOut)
+@router.get("", response_model=ProfileOut | None)
 def get_profile(user: User = Depends(current_user)):
-    if not user.profile:
-        raise HTTPException(404, "Profile not set up yet")
-    return ProfileOut.model_validate(user.profile)
+    """The student's commute profile, or null if they have not set it up yet."""
+    return ProfileOut.model_validate(user.profile) if user.profile else None
 
 
 @router.put("", response_model=ProfileOut)

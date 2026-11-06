@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import random
+from datetime import datetime, timezone
 
 from .areas import AREAS
 from .db import Base, SessionLocal, engine
@@ -21,8 +22,9 @@ FIRST_F = ["Ayesha", "Fatima", "Zainab", "Hira", "Maryam", "Areeba", "Sana", "Ma
 FIRST_M = ["Ahmed", "Ali", "Hamza", "Usman", "Bilal", "Saad", "Hassan", "Omar", "Faizan", "Raza", "Taha", "Zaid"]
 LAST = ["Khan", "Siddiqui", "Qureshi", "Sheikh", "Hussain", "Malik", "Ansari", "Baig", "Mirza", "Raza", "Abbasi", "Shah"]
 # Weight areas so some neighbourhoods are dense (realistic) and some sparse.
-POPULAR = ["Gulshan-e-Iqbal", "DHA Phase 6", "PECHS", "Clifton", "North Nazimabad", "Gulistan-e-Johar",
-           "Bahadurabad", "Federal B Area"]
+# Campus is in Korangi Creek, so nearby south-east areas are weighted as most common.
+POPULAR = ["DHA Phase 6", "DHA Phase 7", "DHA Phase 8", "Korangi", "Defence View", "Gulshan-e-Iqbal",
+           "PECHS", "Clifton", "Mehmoodabad", "Gulistan-e-Johar", "Landhi", "Korangi Creek"]
 TIMETABLES = [
     (("mon", "tue", "wed", "thu"), "08:30", "14:30"),
     (("mon", "wed", "fri"), "09:00", "15:00"),
@@ -62,6 +64,10 @@ def make_students(n: int, seed: int = 42):
 
 
 def seed(n: int = 60, reset: bool = True) -> None:
+    from .config import settings
+
+    if settings.production:
+        raise SystemExit("Refusing to seed: CC_ENV=production would wipe real student data.")
     if reset:
         Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
@@ -71,7 +77,9 @@ def seed(n: int = 60, reset: bool = True) -> None:
                     password_hash=hash_password("admin12345")))
         pw = hash_password("student123")
         for s in make_students(n):
-            u = User(email=s["email"], full_name=s["full_name"], phone=s["phone"], password_hash=pw)
+            u = User(email=s["email"], full_name=s["full_name"], phone=s["phone"], password_hash=pw,
+                     consented_at=datetime.now(timezone.utc), consent_version=settings.consent_version,
+                     research_consent=True)
             u.profile = Profile(**s["profile"])
             db.add(u)
         db.commit()
