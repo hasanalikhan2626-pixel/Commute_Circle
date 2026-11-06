@@ -20,7 +20,8 @@ def make_engine(url: str):
             from sqlalchemy.pool import StaticPool
 
             kwargs["poolclass"] = StaticPool
-    engine = create_engine(url, **kwargs)
+    # pre_ping: Neon closes idle connections when it pauses; test each one before use.
+    engine = create_engine(url, pool_pre_ping=True, pool_recycle=240, **kwargs)
     if url.startswith("sqlite"):
         @event.listens_for(engine, "connect")
         def _fk_on(dbapi_conn, _):  # enforce foreign keys in SQLite
