@@ -5,6 +5,8 @@ whether they can drive; the system forms small, compatible **circles** (2–5 pe
 shares a fair driving rota and splits fuel costs. The transport office runs matching,
 compares algorithms and handles safety reports.
 
+**Live:** https://commutecircle.onrender.com (free hosting; the first visit after a quiet spell can take up to a minute while it wakes)
+
 ## Quick start
 
 Requires Python 3.11+ and Node 18+.
