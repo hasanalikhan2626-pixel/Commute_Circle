@@ -18,10 +18,16 @@ class Role(str, enum.Enum):
     admin = "admin"
 
 
+class UserStatus(str, enum.Enum):
+    pending = "pending"      # signed up, waiting for Student Affairs approval
+    approved = "approved"
+    rejected = "rejected"
+    suspended = "suspended"
+
+
 class Gender(str, enum.Enum):
     female = "female"
     male = "male"
-    undisclosed = "undisclosed"
 
 
 class CircleStatus(str, enum.Enum):
@@ -37,10 +43,24 @@ class MemberStatus(str, enum.Enum):
     left = "left"
 
 
+class TripStatus(str, enum.Enum):
+    planned = "planned"
+    went = "went"
+    notgoing = "notgoing"
+    noshow = "noshow"
+
+
 class ReportStatus(str, enum.Enum):
     open = "open"
     resolved = "resolved"
-    dismissed = "dismissed"
+    suspended = "suspended"  # resolved by suspending the member
+
+
+class SeatStatus(str, enum.Enum):
+    pending = "pending"
+    accepted = "accepted"
+    declined = "declined"
+    cancelled = "cancelled"
 
 
 class User(Base):
@@ -52,32 +72,38 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String(120))
     phone: Mapped[str | None] = mapped_column(String(20))
     role: Mapped[Role] = mapped_column(Enum(Role), default=Role.student)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[UserStatus] = mapped_column(Enum(UserStatus), default=UserStatus.pending)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    # Consent to the privacy notice (required) and to research use (optional, separate).
     consented_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     consent_version: Mapped[str | None] = mapped_column(String(20))
     research_consent: Mapped[bool] = mapped_column(Boolean, default=False)
 
     profile: Mapped[Profile | None] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
-    memberships: Mapped[list[CircleMember]] = relationship(back_populates="user", cascade="all, delete-orphan", passive_deletes=True)
+    memberships: Mapped[list[CircleMember]] = relationship(back_populates="user", cascade="all, delete-orphan",
+                                                           passive_deletes=True)
+
+    @property
+    def can_sign_in(self) -> bool:
+        return self.status in (UserStatus.pending, UserStatus.approved)
 
 
 class Profile(Base):
-    """Commute preferences. Only the student edits this; matching never writes to it."""
+    """Trip details. Only the student edits this; matching never writes to it."""
 
     __tablename__ = "profiles"
 
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    area: Mapped[str] = mapped_column(String(60))
-    pickup_landmark: Mapped[str | None] = mapped_column(String(120))  # shown to circle members only
-    gender: Mapped[Gender] = mapped_column(Enum(Gender), default=Gender.undisclosed)
-    same_gender_only: Mapped[bool] = mapped_column(Boolean, default=False)
-    has_car: Mapped[bool] = mapped_column(Boolean, default=False)
-    seats: Mapped[int] = mapped_column(Integer, default=0)  # passenger seats offered
-    # {"mon": {"arrive": "08:30", "leave": "14:00"}, ...}; absent day = not on campus
+    programme: Mapped[str] = mapped_column(String(120), default="")
+    year: Mapped[int] = mapped_column(Integer, default=1)
+    gender: Mapped[Gender] = mapped_column(Enum(Gender))
+    area: Mapped[str] = mapped_column(String(60), default="")  # set by the trip questions
+    women_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    methods: Mapped[list] = mapped_column(JSON, default=list)  # ways the student is happy to travel
+    has_car: Mapped[bool] = mapped_column(Boolean, default=False)  # needed for "Classmate drives"
+    seats: Mapped[int] = mapped_column(Integer, default=0)
+    # {"Mon": {"in": "08:30", "out": "14:00"}, ...}; a missing day = not on campus
     schedule: Mapped[dict] = mapped_column(JSON, default=dict)
-    seeking: Mapped[bool] = mapped_column(Boolean, default=True)  # opted into matching
+    seeking: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     user: Mapped[User] = relationship(back_populates="profile")
@@ -88,12 +114,17 @@ class Circle(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     status: Mapped[CircleStatus] = mapped_column(Enum(CircleStatus), default=CircleStatus.proposed)
-    algorithm: Mapped[str] = mapped_column(String(40))
-    score: Mapped[float] = mapped_column(Float, default=0.0)
+    mode: Mapped[str] = mapped_column(String(40))
+    source: Mapped[str] = mapped_column(String(40), default="student")  # "student" or an algorithm name
+    fit: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    since: Mapped[date | None] = mapped_column(Date)  # day it became active
+    settled_until: Mapped[date | None] = mapped_column(Date)
     dissolved_reason: Mapped[str | None] = mapped_column(String(200))
 
-    members: Mapped[list[CircleMember]] = relationship(back_populates="circle", cascade="all, delete-orphan")
+    members: Mapped[list[CircleMember]] = relationship(back_populates="circle", cascade="all, delete-orphan",
+                                                       order_by="CircleMember.position")
     rota: Mapped[list[RotaEntry]] = relationship(back_populates="circle", cascade="all, delete-orphan",
                                                  order_by="RotaEntry.day")
 
@@ -105,7 +136,7 @@ class CircleMember(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     circle_id: Mapped[int] = mapped_column(ForeignKey("circles.id", ondelete="CASCADE"), index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    is_driver: Mapped[bool] = mapped_column(Boolean, default=False)
+    position: Mapped[int] = mapped_column(Integer, default=0)  # 0 = the student who found the circle
     status: Mapped[MemberStatus] = mapped_column(Enum(MemberStatus), default=MemberStatus.pending)
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -114,21 +145,113 @@ class CircleMember(Base):
 
 
 class RotaEntry(Base):
+    """Who drives / drops on a day, for the driving modes."""
+
     __tablename__ = "rota_entries"
     __table_args__ = (UniqueConstraint("circle_id", "day"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     circle_id: Mapped[int] = mapped_column(ForeignKey("circles.id", ondelete="CASCADE"), index=True)
     day: Mapped[date] = mapped_column(Date)
-    driver_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    arrive: Mapped[str] = mapped_column(String(5))  # agreed arrival time for the group
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    manual: Mapped[bool] = mapped_column(Boolean, default=False)  # someone took or swapped this day
 
     circle: Mapped[Circle] = relationship(back_populates="rota")
 
 
+class RotaUnavailable(Base):
+    __tablename__ = "rota_unavailable"
+    __table_args__ = (UniqueConstraint("circle_id", "user_id", "day"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    circle_id: Mapped[int] = mapped_column(ForeignKey("circles.id", ondelete="CASCADE"))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    day: Mapped[date] = mapped_column(Date)
+
+
+class Trip(Base):
+    """One circle's trip to campus on one day."""
+
+    __tablename__ = "trips"
+    __table_args__ = (UniqueConstraint("circle_id", "day"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    circle_id: Mapped[int] = mapped_column(ForeignKey("circles.id", ondelete="CASCADE"), index=True)
+    day: Mapped[date] = mapped_column(Date, index=True)
+    mode: Mapped[str] = mapped_column(String(40))
+    confirmed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    total: Mapped[int | None] = mapped_column(Integer)  # fare for everyone who went, in Rs
+    fare_skipped: Mapped[bool] = mapped_column(Boolean, default=False)
+    payer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+
+    members: Mapped[list[TripMember]] = relationship(back_populates="trip", cascade="all, delete-orphan")
+
+
+class TripMember(Base):
+    __tablename__ = "trip_members"
+    __table_args__ = (UniqueConstraint("trip_id", "user_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    trip_id: Mapped[int] = mapped_column(ForeignKey("trips.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    status: Mapped[TripStatus] = mapped_column(Enum(TripStatus), default=TripStatus.planned)
+    guest: Mapped[bool] = mapped_column(Boolean, default=False)  # one-day seat from another circle
+
+    trip: Mapped[Trip] = relationship(back_populates="members")
+
+
+class Absence(Base):
+    """'Not going tomorrow': overrides the weekly plan for one day."""
+
+    __tablename__ = "absences"
+    __table_args__ = (UniqueConstraint("user_id", "day"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    day: Mapped[date] = mapped_column(Date)
+
+
+class Settlement(Base):
+    __tablename__ = "settlements"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    circle_id: Mapped[int] = mapped_column(ForeignKey("circles.id", ondelete="CASCADE"), index=True)
+    from_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    to_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    amount: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Feedback(Base):
+    """Private feedback. Positive tags add up to badges; negatives are seen only by Student Affairs."""
+
+    __tablename__ = "feedback"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    from_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    to_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    circle_id: Mapped[int | None] = mapped_column(ForeignKey("circles.id", ondelete="SET NULL"))
+    up: Mapped[bool] = mapped_column(Boolean)
+    tag: Mapped[str] = mapped_column(String(40))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SeatRequest(Base):
+    """A one-day seat in another circle."""
+
+    __tablename__ = "seat_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    circle_id: Mapped[int] = mapped_column(ForeignKey("circles.id", ondelete="CASCADE"))
+    day: Mapped[date] = mapped_column(Date)
+    status: Mapped[SeatStatus] = mapped_column(Enum(SeatStatus), default=SeatStatus.pending)
+    answered_by: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class DeclinedPair(Base):
-    """Remembers that a student declined a circle containing another student, so
-    the next matching run does not propose the same pairing again."""
+    """A student declined a circle with another student: never propose them together again."""
 
     __tablename__ = "declined_pairs"
     __table_args__ = (UniqueConstraint("user_id", "other_id"),)
@@ -142,7 +265,7 @@ class Report(Base):
     __tablename__ = "reports"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # SET NULL: safety records outlive a deleted account, without identifying it.
+    # SET NULL: safety records outlive a deleted account without identifying it.
     reporter_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     reported_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     circle_id: Mapped[int | None] = mapped_column(ForeignKey("circles.id", ondelete="SET NULL"))
@@ -154,7 +277,7 @@ class Report(Base):
 
 
 class MatchRun(Base):
-    """Audit log of every matching run, used for the algorithm evaluation."""
+    """Audit log of admin matching runs (research component)."""
 
     __tablename__ = "match_runs"
 
@@ -166,15 +289,3 @@ class MatchRun(Base):
     students_matched: Mapped[int] = mapped_column(Integer)
     metrics: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-
-
-class DriverUnavailability(Base):
-    """A driver can't drive on a given day; the rota assigns someone else."""
-
-    __tablename__ = "driver_unavailability"
-    __table_args__ = (UniqueConstraint("circle_id", "user_id", "day"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    circle_id: Mapped[int] = mapped_column(ForeignKey("circles.id", ondelete="CASCADE"))
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    day: Mapped[date] = mapped_column(Date)

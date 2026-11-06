@@ -10,8 +10,9 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .create_admin import bootstrap_admin
-from .db import Base, engine
-from .routers import admin, auth, circles, meta, profile
+from .db import engine
+from .migrate import migrate
+from .routers import admin, auth, meta, student
 
 STATIC = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 
@@ -19,12 +20,12 @@ STATIC = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings.check()
-    Base.metadata.create_all(engine)
+    migrate(engine)
     bootstrap_admin()
     yield
 
 
-app = FastAPI(title="CommuteCircle API", version="1.1.0", lifespan=lifespan,
+app = FastAPI(title="CommuteCircle API", version="2.0.0", lifespan=lifespan,
               docs_url=None if settings.production else "/docs", redoc_url=None)
 app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins), allow_credentials=True,
                    allow_methods=["*"], allow_headers=["*"])
@@ -41,7 +42,7 @@ async def security_headers(request, call_next):
     return resp
 
 
-for r in (auth.router, meta.router, profile.router, circles.router, admin.router):
+for r in (auth.router, meta.router, student.router, admin.router):
     app.include_router(r)
 
 

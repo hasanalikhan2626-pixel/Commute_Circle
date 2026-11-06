@@ -14,7 +14,7 @@ oauth2 = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 def current_user(token: str = Depends(oauth2), db: Session = Depends(get_db)) -> User:
     uid = decode_token(token)
     user = db.get(User, uid) if uid else None
-    if not user or not user.is_active:
+    if not user or not user.can_sign_in:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated",
                             headers={"WWW-Authenticate": "Bearer"})
     return user

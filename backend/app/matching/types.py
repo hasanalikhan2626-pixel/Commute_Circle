@@ -5,23 +5,24 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class Candidate:
-    """Everything the matcher needs about a student, decoupled from the ORM so the
-    algorithms are pure functions and can be tested and benchmarked in isolation."""
+    """What the matcher needs about a student, decoupled from the ORM so the
+    algorithms are pure functions that can be tested and benchmarked alone."""
 
     user_id: int
     location: tuple[float, float]
-    gender: str
-    same_gender_only: bool
+    gender: str  # "female" | "male"
+    women_only: bool
+    methods: tuple[str, ...]
     has_car: bool
     seats: int
-    schedule: dict[str, dict[str, str]]  # day -> {"arrive": "HH:MM", "leave": "HH:MM"}
+    schedule: dict  # "Mon" -> {"in": "HH:MM", "out": "HH:MM"}; missing day = not on campus
 
 
 @dataclass
 class ProposedCircle:
     member_ids: list[int]
-    driver_ids: list[int]
-    score: float = 0.0
+    mode: str
+    fit: int = 0
 
 
 @dataclass

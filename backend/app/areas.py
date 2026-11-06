@@ -1,45 +1,52 @@
-"""Karachi residential areas used as privacy-preserving pickup zones.
+"""Karachi areas used as privacy-preserving pickup zones (area, never an address).
 
-Students choose an area, never an exact address. Coordinates are approximate
-area centroids (good to roughly 1 km), which is enough for grouping and
-cost estimates and keeps home locations private.
+Coordinates are approximate area centre points (good to ~1 km). The first group is
+the prototype's list; the second adds areas near the Korangi Creek campus and other
+common neighbourhoods.
 """
 from __future__ import annotations
 
 AREAS: dict[str, tuple[float, float]] = {
-    "Bahadurabad": (24.8826, 67.0700),
-    "Bahria Town": (25.0100, 67.3100),
-    "Clifton": (24.8138, 67.0300),
-    "DHA Phase 2": (24.8350, 67.0500),
-    "DHA Phase 5": (24.8050, 67.0550),
-    "DHA Phase 6": (24.7950, 67.0650),
-    "DHA Phase 7": (24.8150, 67.0800),
-    "DHA Phase 8": (24.7850, 67.0900),
-    "Defence View": (24.8420, 67.0700),
-    "Federal B Area": (24.9300, 67.0750),
-    "Gulberg": (24.9330, 67.0700),
-    "Gulistan-e-Johar": (24.9180, 67.1300),
-    "Gulshan-e-Iqbal": (24.9215, 67.0947),
-    "Akhtar Colony": (24.8400, 67.0780),
-    "Ibrahim Hyderi": (24.7880, 67.1450),
-    "Kemari": (24.8200, 66.9800),
-    "Korangi": (24.8300, 67.1300),
-    "Korangi Creek": (24.7960, 67.1350),
-    "Landhi": (24.8450, 67.2050),
-    "Malir": (24.8930, 67.2000),
-    "Mehmoodabad": (24.8480, 67.0800),
-    "Model Colony": (24.8820, 67.1880),
-    "Nazimabad": (24.9130, 67.0300),
-    "North Karachi": (24.9750, 67.0600),
-    "North Nazimabad": (24.9420, 67.0430),
-    "PECHS": (24.8700, 67.0600),
-    "Quaidabad": (24.8700, 67.2300),
-    "Saddar": (24.8556, 67.0280),
-    "Scheme 33": (24.9500, 67.1500),
-    "Shah Faisal Colony": (24.8780, 67.1650),
-    "Tariq Road": (24.8740, 67.0640),
+    # From the prototype
+    "Clifton Block 5": (24.818, 67.030),
+    "DHA Phase 6": (24.803, 67.060),
+    "DHA Phase 8": (24.787, 67.078),
+    "Saddar": (24.856, 67.022),
+    "PECHS Block 6": (24.866, 67.067),
+    "Bahadurabad": (24.880, 67.069),
+    "Mehmoodabad": (24.852, 67.090),
+    "Gulshan-e-Iqbal Block 13": (24.914, 67.093),
+    "Gulshan-e-Iqbal Block 10": (24.926, 67.100),
+    "Gulistan-e-Johar Block 15": (24.910, 67.134),
+    "Nazimabad No. 3": (24.914, 67.031),
+    "North Nazimabad Block H": (24.940, 67.040),
+    "Shah Faisal Colony": (24.877, 67.156),
+    "Model Colony": (24.896, 67.190),
+    "Malir Cantt": (24.940, 67.205),
+    "Korangi No. 5": (24.833, 67.138),
+    "Defence View": (24.840, 67.080),
+    # Added
+    "Akhtar Colony": (24.840, 67.078),
+    "Bahria Town": (25.010, 67.310),
+    "DHA Phase 2": (24.835, 67.050),
+    "DHA Phase 5": (24.805, 67.055),
+    "DHA Phase 7": (24.815, 67.080),
+    "Federal B Area": (24.930, 67.075),
+    "Gulberg": (24.933, 67.070),
+    "Ibrahim Hyderi": (24.788, 67.145),
+    "Kemari": (24.820, 66.980),
+    "Korangi Creek": (24.796, 67.135),
+    "Landhi": (24.845, 67.205),
+    "North Karachi": (24.975, 67.060),
+    "Quaidabad": (24.870, 67.230),
+    "Scheme 33": (24.950, 67.150),
+    "Tariq Road": (24.874, 67.064),
 }
 
 
 def area_coords(name: str) -> tuple[float, float]:
     return AREAS[name]
+
+
+def short_area(name: str) -> str:
+    return name.replace("Gulshan-e-Iqbal", "Gulshan").replace("Gulistan-e-Johar", "Johar")

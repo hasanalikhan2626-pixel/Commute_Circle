@@ -42,15 +42,14 @@ class Settings:
     # Cost model inputs (PKR per litre of petrol).
     fuel_price_pkr: float = field(default_factory=lambda: float(_env("FUEL_PRICE_PKR", "352.59")))
     fuel_km_per_litre: float = field(default_factory=lambda: float(_env("FUEL_KM_PER_LITRE", "12")))
-    # Road distance is longer than straight-line distance; 1.3 is a common urban factor.
-    road_factor: float = field(default_factory=lambda: float(_env("ROAD_FACTOR", "1.3")))
+    # Road distance is longer than straight-line distance (prototype: x1.35).
+    road_factor: float = field(default_factory=lambda: float(_env("ROAD_FACTOR", "1.35")))
     co2_kg_per_litre: float = 2.31  # petrol combustion, IPCC default
-    max_circle_size: int = 5
-    schedule_window_min: int = 30  # arrival times within this window count as compatible
-    min_shared_days: int = 2
+    max_circle_size: int = 4
+    schedule_window_min: int = 20  # everyone arrives within this many minutes of the circle's first member
 
 
-    consent_version: str = "2026-11"  # bump when the privacy notice changes
+    consent_version: str = "2026-12"  # bump when the privacy notice changes
 
     @property
     def production(self) -> bool:

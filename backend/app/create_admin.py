@@ -17,7 +17,7 @@ import sys
 from sqlalchemy import select
 
 from .db import Base, SessionLocal, engine
-from .models import Role, User
+from .models import Role, User, UserStatus
 from .security import hash_password
 
 
@@ -40,7 +40,8 @@ def bootstrap_admin() -> None:
     with SessionLocal() as db:
         if db.scalar(select(User).where(User.email == email)):
             return
-        db.add(User(email=email, full_name="Transport Office", role=Role.admin, password_hash=hash_password(password)))
+        db.add(User(email=email, full_name="Student Affairs", role=Role.admin, status=UserStatus.approved,
+                    password_hash=hash_password(password)))
         db.commit()
         log.warning("Created admin account %s from CC_ADMIN_EMAIL", email)
 
@@ -56,10 +57,11 @@ def main(argv: list[str]) -> None:
     with SessionLocal() as db:
         u = db.scalar(select(User).where(User.email == email))
         if u:
-            u.password_hash, u.role, u.is_active = hash_password(pw), Role.admin, True
+            u.password_hash, u.role, u.status = hash_password(pw), Role.admin, UserStatus.approved
             print(f"Updated {email} (now admin).")
         else:
-            db.add(User(email=email, full_name=name, role=Role.admin, password_hash=hash_password(pw)))
+            db.add(User(email=email, full_name=name, role=Role.admin, status=UserStatus.approved,
+                        password_hash=hash_password(pw)))
             print(f"Created admin {email}.")
         db.commit()
 
