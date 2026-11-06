@@ -11,23 +11,40 @@ with no card required, and give you a public HTTPS URL.
 Create an empty repository and push this folder to it (`git push -u origin main`).
 
 ## 2. Create the database (Neon)
-1. Sign up at neon.tech and create a project (region: *AWS Asia Pacific (Singapore)*, nearest to Karachi).
-2. Copy the **connection string** (`postgresql://…?sslmode=require`).
+1. In the Neon console, open your project (or choose **New project**: Postgres **16**,
+   region **AWS Asia Pacific (Singapore)**, nearest to Karachi).
+2. Click **Connect**, turn **Connection pooling off**, and copy the connection string
+   (`postgresql://…neon.tech/neondb?sslmode=require…`). The app runs one process, so it
+   doesn't need the pooler, and a direct connection avoids PgBouncer prepared-statement issues.
+3. Treat this string as a password: paste it only into Render, never into chat or the repo.
+
+`neon.ts` and the root `package.json` hold the Neon CLI project config (`neon init`).
+The Python app does not use them; it only reads `CC_DATABASE_URL`.
 
 ## 3. Create the web service (Render)
-1. Sign up at render.com with GitHub, then choose **New → Blueprint** and pick the repository.
-   Render reads `render.yaml`.
-2. When asked, paste the Neon string into `CC_DATABASE_URL`. `CC_SECRET_KEY` is generated for you.
-3. Wait for the first deploy (about 5 minutes). Then open `https://<service>.onrender.com/api/health`;
-   it should return `{"status":"ok"}`.
-4. If your service URL differs from `commutecircle.onrender.com`, update `CC_CORS_ORIGINS`.
+1. Sign up at render.com **with GitHub** and allow access to the `Commute_Circle` repository.
+2. Choose **New → Blueprint** and select the repository; Render reads `render.yaml`.
+3. Render asks for two secret values:
+   * `CC_DATABASE_URL`: the Neon string from step 2.
+   * `CC_ADMIN_PASSWORD`: a new password (12+ characters) for the transport-office
+     account `transport@bic.edu.pk`, which the app creates on first start.
+   `CC_SECRET_KEY` is generated for you.
+4. Click **Apply** and wait for the first deploy (about 5–10 minutes; the log ends with
+   `Application startup complete`).
+5. Open `https://<service>.onrender.com/api/health`; it should show `{"status":"ok"}`.
+6. If your URL is not `commutecircle.onrender.com`, set `CC_CORS_ORIGINS` to it under
+   **Environment** (this saves and redeploys).
 
-## 4. Create the transport-office admin
-In Render, open the service, then **Shell**, and run:
-```
-python -m app.create_admin transport@bic.edu.pk "Transport Office"
-```
-Never run `python -m app.seed` against production (it refuses when `CC_ENV=production`).
+## 4. First sign-in
+1. Sign in at your Render URL as `transport@bic.edu.pk` with the password from step 3.
+2. Optionally delete `CC_ADMIN_PASSWORD` under **Environment** afterwards. The account
+   stays; the variable is only read when the account does not exist yet, and an existing
+   account is never overwritten.
+3. Students register themselves with their `@bic.edu.pk` email.
+
+Render's free plan has no Shell. Where a shell is available, `python -m app.create_admin`
+also creates or resets an admin. Never run `python -m app.seed` against production
+(it refuses when `CC_ENV=production`).
 
 ## 5. Before the Week 25 demo
 * Free Render services **sleep after 15 minutes idle** and take about 50 seconds to wake.

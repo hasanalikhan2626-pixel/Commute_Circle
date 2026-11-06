@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import settings
+from .create_admin import bootstrap_admin
 from .db import Base, engine
 from .routers import admin, auth, circles, meta, profile
 
@@ -19,6 +20,7 @@ STATIC = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 async def lifespan(_: FastAPI):
     settings.check()
     Base.metadata.create_all(engine)
+    bootstrap_admin()
     yield
 
 

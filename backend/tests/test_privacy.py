@@ -81,3 +81,28 @@ def test_production_refuses_unsafe_settings(monkeypatch):
         Settings().check()
     monkeypatch.setenv("CC_DATABASE_URL", "postgresql://u:p@h/db")
     Settings().check()
+
+
+def test_bootstrap_admin_from_env(monkeypatch, client, db):
+    import pytest
+    from sqlalchemy import select
+
+    from app.create_admin import bootstrap_admin
+    from app.models import Role, User
+
+    monkeypatch.setenv("CC_ADMIN_EMAIL", "Transport@bic.edu.pk")
+    monkeypatch.setenv("CC_ADMIN_PASSWORD", "short")
+    with pytest.raises(RuntimeError):
+        bootstrap_admin()
+    monkeypatch.setenv("CC_ADMIN_PASSWORD", "a-long-admin-password")
+    bootstrap_admin()
+    bootstrap_admin()  # idempotent
+    users = db.scalars(select(User).where(User.email == "transport@bic.edu.pk")).all()
+    assert len(users) == 1 and users[0].role == Role.admin
+    r = client.post("/api/auth/login", data={"username": "transport@bic.edu.pk", "password": "a-long-admin-password"})
+    assert r.status_code == 200
+    # An existing account is never overwritten by a changed variable.
+    monkeypatch.setenv("CC_ADMIN_PASSWORD", "a-different-long-password")
+    bootstrap_admin()
+    r = client.post("/api/auth/login", data={"username": "transport@bic.edu.pk", "password": "a-different-long-password"})
+    assert r.status_code == 401
