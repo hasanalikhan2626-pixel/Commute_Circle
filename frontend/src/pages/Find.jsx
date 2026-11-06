@@ -7,6 +7,7 @@ import { useMeta } from '../meta'
 import Map from '../components/Map'
 import { useToast } from '../components/Toast'
 import { Av, Err, Loading } from '../components/ui'
+import VerifyEmail from '../components/VerifyEmail'
 
 export default function Find() {
   const { circle } = useCircle()
@@ -68,6 +69,7 @@ function Search() {
     <>
       <h2>{rematch ? 'Update your timetable to re-match' : `Hi ${first}, let’s find your circle`}</h2>
       <p className="lead">Three quick questions. We match you with classmates who live near you, or on your way, and come to campus at the same times.</p>
+      <VerifyEmail />
       {user.status === 'pending' && <div className="notice" style={{ marginBottom: 16 }}><span aria-hidden="true">ℹ</span><span>Student Affairs is checking your sign-up against the student record. Answer the questions now and you can search as soon as you’re approved.</span></div>}
       <div className="cols">
         <section className="card stack">

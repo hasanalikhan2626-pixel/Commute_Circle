@@ -355,3 +355,18 @@ class SurveyResponse(Base):
     answers: Mapped[dict] = mapped_column(JSON, default=dict)
     score: Mapped[float | None] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class EmailCode(Base):
+    """One-time 6-digit codes for email verification and password reset (stored hashed)."""
+
+    __tablename__ = "email_codes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    purpose: Mapped[str] = mapped_column(String(10))  # verify | reset
+    code_hash: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    used: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

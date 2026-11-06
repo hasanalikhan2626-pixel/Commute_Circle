@@ -11,7 +11,7 @@ from ..config import settings
 from ..db import get_db
 from ..deps import current_user
 from ..models import Profile, Report, User, UserStatus
-from ..schemas import DeleteAccountIn, RegisterIn, UserUpdate
+from ..schemas import CodeIn, DeleteAccountIn, ForgotIn, RegisterIn, ResetIn, UserUpdate
 from ..security import create_token, hash_password, throttle, verify_password
 from ..services import circles as svc
 
@@ -40,6 +40,10 @@ def register(body: RegisterIn, db: Session = Depends(get_db)):
                 consented_at=datetime.now(timezone.utc), consent_version=settings.consent_version)
     user.profile = Profile(gender=body.gender, programme=body.programme, year=body.year)
     db.add(user)
+    db.flush()
+    from ..services import codes
+
+    codes.send(db, user, "verify")
     db.commit()
     return {"access_token": create_token(user.id), "token_type": "bearer"}
 
@@ -108,3 +112,65 @@ def delete_account(body: DeleteAccountIn, user: User = Depends(current_user), db
     svc.remove_user_everywhere(db, user)
     db.delete(user)
     db.commit()
+
+
+# --- Email verification and password reset --------------------------------------
+
+@router.post("/verify/send")
+def verify_send(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from ..services import codes
+
+    if user.email_verified:
+        return {"ok": True, "already": True}
+    try:
+        codes.send(db, user, "verify")
+    except codes.CodeError as e:
+        raise HTTPException(429, str(e)) from e
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/verify")
+def verify(body: CodeIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from ..services import codes
+
+    try:
+        codes.check(db, user, "verify", body.code)
+    except codes.CodeError as e:
+        raise HTTPException(422, str(e)) from e
+    user.email_verified = True
+    db.commit()
+    return user_out(user)
+
+
+@router.post("/forgot")
+def forgot(body: ForgotIn, db: Session = Depends(get_db)):
+    """Always answers the same way, so it can't be used to find out who has an account."""
+    from ..services import codes
+
+    user = db.scalar(select(User).where(User.email == body.email.lower()))
+    if user and user.can_sign_in:
+        try:
+            codes.send(db, user, "reset")
+            db.commit()
+        except codes.CodeError:
+            pass
+    return {"ok": True, "message": "If that email has an account, we've sent a reset code."}
+
+
+@router.post("/reset")
+def reset(body: ResetIn, db: Session = Depends(get_db)):
+    from ..services import codes
+
+    user = db.scalar(select(User).where(User.email == body.email.lower()))
+    if not user:
+        raise HTTPException(422, "That code isn't right")
+    try:
+        codes.check(db, user, "reset", body.code)
+    except codes.CodeError as e:
+        raise HTTPException(422, str(e)) from e
+    user.password_hash = hash_password(body.new_password)
+    user.email_verified = True  # they proved they own the inbox
+    throttle.reset(user.email)
+    db.commit()
+    return {"access_token": create_token(user.id), "token_type": "bearer"}

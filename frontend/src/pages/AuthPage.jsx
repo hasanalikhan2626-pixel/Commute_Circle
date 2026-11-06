@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { api, token } from '../api'
 import { useAuth } from '../auth'
 import { useMeta } from '../meta'
 import { Err, Logo } from '../components/ui'
@@ -19,6 +20,7 @@ export default function AuthPage() {
       else await register({ ...f, year: Number(f.year) })
     } catch (ex) { setErr(ex.message) } finally { setBusy(false) }
   }
+  if (mode === 'forgot') return <Forgot back={() => setMode('login')} />
   return (
     <div className="auth">
       <div className="pitch">
@@ -58,6 +60,40 @@ export default function AuthPage() {
         <Err>{err}</Err>
         <button className="btn primary big" disabled={busy}>{busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}</button>
         {mode === 'register' && <p className="hint">Student Affairs checks each sign-up against the student record before you can be matched.</p>}
+        {mode === 'login' && <button type="button" className="link" onClick={() => setMode('forgot')}>Forgot password?</button>}
+      </form>
+    </div>
+  )
+}
+
+function Forgot({ back }) {
+  const [email, setEmail] = useState('')
+  const [step, setStep] = useState('ask')
+  const [code, setCode] = useState('')
+  const [pw, setPw] = useState('')
+  const [msg, setMsg] = useState({})
+  const ask = async (e) => {
+    e.preventDefault(); setMsg({})
+    try { const r = await api('/api/auth/forgot', { method: 'POST', body: { email } }); setMsg({ ok: r.message }); setStep('reset') } catch (ex) { setMsg({ err: ex.message }) }
+  }
+  const reset = async (e) => {
+    e.preventDefault(); setMsg({})
+    try { const r = await api('/api/auth/reset', { method: 'POST', body: { email, code, new_password: pw } }); token.set(r.access_token); window.location.assign('/') } catch (ex) { setMsg({ err: ex.message }) }
+  }
+  return (
+    <div className="auth">
+      <div className="pitch"><div className="brand"><Logo size={44} /><div><h1 style={{ fontSize: '1.5rem', margin: 0 }}>CommuteCircle</h1><small>BIC Karachi · Korangi Creek</small></div></div>
+        <h1>Reset your password</h1><p className="lead">We’ll email a 6-digit code to your BIC address. It works for 30 minutes.</p></div>
+      <form className="card stack" onSubmit={step === 'ask' ? ask : reset}>
+        <label className="f">BIC email<input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" placeholder="you@bic.edu.pk" disabled={step !== 'ask'} /></label>
+        {step === 'reset' && <>
+          <label className="f">6-digit code<input type="text" inputMode="numeric" required maxLength={6} value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} /></label>
+          <label className="f">New password<input type="password" required minLength={8} value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" /></label>
+        </>}
+        {msg.ok && <div className="notice"><span>{msg.ok}</span></div>}
+        <Err>{msg.err}</Err>
+        <button className="btn primary big">{step === 'ask' ? 'Email me a code' : 'Set new password'}</button>
+        <button type="button" className="link" onClick={back}>Back to sign in</button>
       </form>
     </div>
   )

@@ -38,6 +38,10 @@ def group_of(c: Circle):
 def _seeker(db: Session, user: User):
     if user.status != UserStatus.approved:
         raise CircleError("Your sign-up is waiting for approval by Student Affairs")
+    from . import notify
+
+    if notify.email_ready() and not user.email_verified:
+        raise CircleError("Verify your email first: enter the 6-digit code we emailed you")
     if not user.profile or not user.profile.schedule or not user.profile.methods:
         raise CircleError("Answer the three trip questions first")
     return to_candidate(user.profile)

@@ -159,3 +159,37 @@ def test_demo_seed_only_into_empty_non_production_db(monkeypatch, db):
     db.commit()
     seed_mod.seed_if_empty()
     assert db.query(User).count() == 0
+
+
+def test_email_verification_and_password_reset(client, db, monkeypatch):
+    from app.models import EmailCode, Notification, User
+    from app.services import codes
+
+    sent = {}
+    real_send = codes.send
+
+    def spy(db_, user, purpose):
+        sent[purpose] = real_send(db_, user, purpose)
+        return sent[purpose]
+
+    monkeypatch.setattr(codes, "send", spy)
+    h = signup(client, 1)
+    assert "verify" in sent and me(client, h)["email_verified"] is False
+    assert db.query(Notification).filter_by(template="code_verify", status="mock").count() == 1
+    assert client.post("/api/auth/verify", json={"code": "000000" if sent["verify"] != "000000" else "111111"}, headers=h).status_code == 422
+    assert client.post("/api/auth/verify", json={"code": sent["verify"]}, headers=h).json()["email_verified"] is True
+    # Forgot password: same answer for unknown emails; code resets the password once.
+    assert client.post("/api/auth/forgot", json={"email": "nobody@bic.edu.pk"}).json()["ok"]
+    client.post("/api/auth/forgot", json={"email": "s1@bic.edu.pk"})
+    r = client.post("/api/auth/reset", json={"email": "s1@bic.edu.pk", "code": sent["reset"], "new_password": "newpass123"})
+    assert r.status_code == 200
+    assert client.post("/api/auth/login", data={"username": "s1@bic.edu.pk", "password": "newpass123"}).status_code == 200
+    assert client.post("/api/auth/reset", json={"email": "s1@bic.edu.pk", "code": sent["reset"], "new_password": "again1234"}).status_code == 422
+    # Too many wrong attempts locks the code.
+    db.query(EmailCode).delete()
+    db.commit()
+    code = real_send(db, db.query(User).filter_by(email="s1@bic.edu.pk").one(), "reset")
+    db.commit()
+    for _ in range(5):
+        client.post("/api/auth/reset", json={"email": "s1@bic.edu.pk", "code": "999999" if code != "999999" else "888888", "new_password": "x1234567"})
+    assert client.post("/api/auth/reset", json={"email": "s1@bic.edu.pk", "code": code, "new_password": "x1234567"}).status_code == 422

@@ -4,6 +4,7 @@ import { api } from '../api'
 import { useAuth } from '../auth'
 import { useToast } from '../components/Toast'
 import { Err } from '../components/ui'
+import VerifyEmail from '../components/VerifyEmail'
 
 export default function AccountPage() {
   const { user, refresh, logout } = useAuth()
@@ -30,6 +31,7 @@ export default function AccountPage() {
     <>
       <h2>Account</h2>
       <p className="lead">{user.email} · {user.role === 'admin' ? 'Student Affairs' : `${user.programme || ''}, Year ${user.year || ''}`} · <span className="badge">{user.status}</span></p>
+      <VerifyEmail />
       <div className="cols">
         <form className="card stack" onSubmit={save}>
           <label className="f">Full name<input type="text" required minLength={2} value={f.full_name} onChange={(e) => setF({ ...f, full_name: e.target.value })} /></label>

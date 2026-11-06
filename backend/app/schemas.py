@@ -261,3 +261,17 @@ class SosUpdate(BaseModel):
 class SurveyIn(BaseModel):
     answers: list[int] = Field(default=[], max_length=10)
     amount_pkr: int | None = Field(default=None, ge=0, le=500_000)  # spending surveys
+
+
+class CodeIn(BaseModel):
+    code: str = Field(min_length=6, max_length=6)
+
+
+class ForgotIn(BaseModel):
+    email: EmailStr
+
+
+class ResetIn(BaseModel):
+    email: EmailStr
+    code: str = Field(min_length=6, max_length=6)
+    new_password: str = Field(min_length=8, max_length=128)
