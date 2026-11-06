@@ -33,6 +33,8 @@ def user_out(u: User) -> dict:
 def register(body: RegisterIn, db: Session = Depends(get_db)):
     if db.scalar(select(User).where(User.email == body.email)):
         raise HTTPException(status.HTTP_409_CONFLICT, "An account with this email already exists")
+    if db.scalar(select(User).where(User.phone == body.phone)):
+        raise HTTPException(status.HTTP_409_CONFLICT, "This mobile number is already linked to another account")
     user = User(email=body.email, password_hash=hash_password(body.password), full_name=body.full_name,
                 phone=body.phone, research_consent=body.research_consent, status=UserStatus.pending,
                 consented_at=datetime.now(timezone.utc), consent_version=settings.consent_version)
@@ -64,6 +66,8 @@ def me(user: User = Depends(current_user)):
 
 @router.patch("/me")
 def update_me(body: UserUpdate, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    if body.phone and db.scalar(select(User).where(User.phone == body.phone, User.id != user.id)):
+        raise HTTPException(status.HTTP_409_CONFLICT, "This mobile number is already linked to another account")
     for k, v in body.model_dump(exclude_unset=True).items():
         if v is not None or k in ("emergency_name", "emergency_phone"):
             setattr(user, k, v)

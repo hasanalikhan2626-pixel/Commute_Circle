@@ -1,0 +1,20 @@
+# Runs CommuteCircle's scheduled jobs (WhatsApp reminders and check-ins, expiring stale
+# proposals) every 15 minutes on weekdays, 06:00-18:30 Karachi time (UTC+5).
+# Needs repository secrets CC_APP_URL and CC_JOBS_TOKEN (see docs/WHATSAPP.md); skips if unset.
+name: Scheduled jobs
+on:
+  schedule:
+    - cron: "*/15 1-13 * * 1-5"
+  workflow_dispatch:
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call /api/jobs/run
+        env:
+          URL: ${{ secrets.CC_APP_URL }}
+          TOKEN: ${{ secrets.CC_JOBS_TOKEN }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$TOKEN" ]; then echo "CC_APP_URL / CC_JOBS_TOKEN not set; skipping."; exit 0; fi
+          # Render's free plan sleeps when idle; the first request can take ~50 s to wake it.
+          curl -fsS --retry 3 --retry-delay 20 --max-time 120 -X POST "$URL/api/jobs/run" -H "X-Jobs-Token: $TOKEN"

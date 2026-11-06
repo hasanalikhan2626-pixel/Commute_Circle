@@ -17,6 +17,8 @@ def test_signup_validation(client):
     h = {"Authorization": f"Bearer {r.json()['access_token']}"}
     u = client.get("/api/auth/me", headers=h).json()
     assert u["email"] == "a@bic.edu.pk" and u["status"] == "pending" and u["phone"] == "+923001234567"
+    dup = base | {"email": "b@bic.edu.pk"}
+    assert client.post("/api/auth/register", json=dup).status_code == 409  # same mobile number
 
 
 def test_pending_students_cannot_match(client):
@@ -291,3 +293,39 @@ def test_surveys_and_sus_scoring(client, admin):
     assert client.post("/api/surveys/sus", json={"answers": [4, 2] * 5}, headers=hs[0]).status_code == 409  # needs 5 trips
     ev = {r["metric"]: r for r in client.get("/api/admin/evaluation", headers=admin).json()}
     assert ev["Matching success rate"]["target"] == ">= 75%" and ev["SUS usability score"]["value"] is None
+
+
+def test_whatsapp_jobs_and_replies(client, admin, monkeypatch, db):
+    import hashlib
+    import hmac
+    import json
+
+    monkeypatch.setenv("CC_JOBS_TOKEN", "jobs-secret")
+    monkeypatch.setenv("CC_WHATSAPP_APP_SECRET", "app-secret")
+    monkeypatch.setenv("CC_WHATSAPP_VERIFY_TOKEN", "verify-me")
+    hs = [student(client, i) for i in range(1, 3)]
+    for h in hs:
+        client.patch("/api/auth/me", json={"whatsapp_opt_in": True}, headers=h)
+    circle_of(client, hs)
+    assert client.post("/api/jobs/run", headers={"X-Jobs-Token": "nope"}).status_code == 403
+    monkeypatch.setenv("CC_NOW", "2026-11-09T07:50")  # Monday, 40 min before the 08:30 arrival
+    r = client.post("/api/jobs/run", headers={"X-Jobs-Token": "jobs-secret"}).json()
+    assert r["reminders"] == 2
+    assert client.post("/api/jobs/run", headers={"X-Jobs-Token": "jobs-secret"}).json()["reminders"] == 0  # once a day
+    monkeypatch.setenv("CC_NOW", "2026-11-09T09:15")
+    assert client.post("/api/jobs/run", headers={"X-Jobs-Token": "jobs-secret"}).json()["checkins"] == 2
+    # Meta webhook verification and a signed "1" reply
+    v = client.get("/api/whatsapp/webhook", params={"hub.mode": "subscribe", "hub.verify_token": "verify-me", "hub.challenge": "42"})
+    assert v.text == "42"
+    body = json.dumps({"entry": [{"changes": [{"value": {"messages": [{"from": "923001000001", "type": "text", "text": {"body": "1"}}]}}]}]}).encode()
+    sig = "sha256=" + hmac.new(b"app-secret", body, hashlib.sha256).hexdigest()
+    assert client.post("/api/whatsapp/webhook", content=body, headers={"X-Hub-Signature-256": "sha256=bad"}).status_code == 403
+    assert client.post("/api/whatsapp/webhook", content=body, headers={"X-Hub-Signature-256": sig}).json()["handled"] == 1
+    t = client.get("/api/today", headers=hs[0]).json()["trip"]
+    assert t["confirmed"] and t["confirmed_by_me"]
+    body2 = json.dumps({"entry": [{"changes": [{"value": {"messages": [{"from": "923001000001", "type": "text", "text": {"body": "150"}}]}}]}]}).encode()
+    sig2 = "sha256=" + hmac.new(b"app-secret", body2, hashlib.sha256).hexdigest()
+    client.post("/api/whatsapp/webhook", content=body2, headers={"X-Hub-Signature-256": sig2})
+    assert client.get("/api/money", headers=hs[0]).json()["balance"] == 150
+    out = client.get("/api/admin/outbox", headers=admin).json()["messages"]
+    assert {m["template"] for m in out} >= {"cc_reminder", "cc_checkin", "cc_proposal", "text"}

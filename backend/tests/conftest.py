@@ -49,7 +49,7 @@ def auth(token):
 def signup(client, n, gender="female", approve=True, research=False):
     r = client.post("/api/auth/register", json={
         "email": f"s{n}@bic.edu.pk", "password": "password123", "full_name": NAMES[n % len(NAMES)],
-        "phone": "0300 1234567", "gender": gender, "programme": "BBA (Essex)", "year": 2,
+        "phone": f"0300 {1000000 + n}", "gender": gender, "programme": "BBA (Essex)", "year": 2,
         "consent": True, "research_consent": research})
     assert r.status_code == 201, r.text
     h = auth(r.json()["access_token"])

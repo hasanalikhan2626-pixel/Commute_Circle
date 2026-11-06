@@ -12,7 +12,7 @@ from .config import settings
 from .create_admin import bootstrap_admin
 from .db import engine
 from .migrate import migrate
-from .routers import admin, auth, meta, student
+from .routers import admin, auth, integrations, meta, student
 
 STATIC = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 
@@ -45,7 +45,7 @@ async def security_headers(request, call_next):
     return resp
 
 
-for r in (auth.router, meta.router, student.router, admin.router):
+for r in (auth.router, meta.router, student.router, admin.router, integrations.router):
     app.include_router(r)
 
 

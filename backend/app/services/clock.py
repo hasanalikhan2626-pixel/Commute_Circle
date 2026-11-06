@@ -29,6 +29,20 @@ def set_today(d: date | None) -> None:
     _override = d
 
 
+def now() -> datetime:
+    """Current time in Karachi. Outside production, CC_NOW=YYYY-MM-DDTHH:MM pins it (tests, demos)."""
+    import os
+
+    from ..config import settings
+
+    pinned = os.environ.get("CC_NOW")
+    if pinned and not settings.production:
+        return datetime.fromisoformat(pinned).replace(tzinfo=PKT)
+    if _override:
+        return datetime.combine(_override, datetime.now(PKT).time(), PKT)
+    return datetime.now(PKT)
+
+
 def day_name(d: date) -> str | None:
     return DAYS[d.weekday()] if d.weekday() < 5 else None
 

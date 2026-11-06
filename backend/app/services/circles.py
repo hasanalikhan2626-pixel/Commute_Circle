@@ -78,6 +78,10 @@ def accept_option(db: Session, user: User, member_ids: list[int]) -> Circle:
     circle.members = [CircleMember(user_id=i, position=n, status=MemberStatus.accepted if i == user.id
                                    else MemberStatus.pending) for n, i in enumerate(ids)]
     db.add(circle)
+    db.flush()
+    from .jobs import notify_proposal
+
+    notify_proposal(db, circle)
     db.commit()
     return circle
 
