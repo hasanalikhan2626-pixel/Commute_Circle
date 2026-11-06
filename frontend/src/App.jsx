@@ -18,6 +18,8 @@ import Approvals from './pages/admin/Approvals'
 import Reports from './pages/admin/Reports'
 import Lab from './pages/admin/Lab'
 import Students from './pages/admin/Students'
+import Messages from './pages/admin/Messages'
+import Evaluation from './pages/admin/Evaluation'
 
 const CircleCtx = createContext(null)
 export const useCircle = () => useContext(CircleCtx)
@@ -83,10 +85,10 @@ function StudentApp() {
 function AdminApp() {
   const [counts, setCounts] = useState({})
   const loc = useLocation()
-  useEffect(() => { api('/api/admin/usage').then((u) => setCounts({ p: u.pending, r: u.open_reports })).catch(() => {}) }, [loc.pathname])
+  useEffect(() => { api('/api/admin/usage').then((u) => setCounts({ p: u.pending, r: u.open_reports + u.open_sos })).catch(() => {}) }, [loc.pathname])
   const tabs = [['/admin/usage', 'Usage'], ['/admin/fares', 'Fares'], ['/admin/health', 'Circle health'],
     ['/admin/approvals', 'Approvals', counts.p], ['/admin/reports', 'Reports', counts.r],
-    ['/admin/lab', 'Matching lab'], ['/admin/students', 'Students']]
+    ['/admin/lab', 'Matching lab'], ['/admin/evaluation', 'Evaluation'], ['/admin/students', 'Students'], ['/admin/messages', 'Messages']]
   return (
     <>
       <Header tabs={tabs} />
@@ -99,6 +101,8 @@ function AdminApp() {
           <Route path="/admin/reports" element={<Reports />} />
           <Route path="/admin/lab" element={<Lab />} />
           <Route path="/admin/students" element={<Students />} />
+          <Route path="/admin/messages" element={<Messages />} />
+          <Route path="/admin/evaluation" element={<Evaluation />} />
           <Route path="/account" element={<AccountPage />} />
           <Route path="/privacy" element={<PrivacyPage />} />
           <Route path="*" element={<Navigate to="/admin/usage" replace />} />

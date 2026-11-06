@@ -1,5 +1,6 @@
 import { api, rs, sa } from '../api'
 import { Err, Loading, useLoad } from '../components/ui'
+import Surveys from '../components/Surveys'
 
 export default function Savings() {
   const [d, err] = useLoad(() => api('/api/savings'))
@@ -34,6 +35,7 @@ export default function Savings() {
               <td className="mono sub" style={{ textAlign: 'right' }}>{g.n ? `${rs(g.lo)}–${rs(g.hi).replace('Rs ', '')}` : 'not enough data'}</td><td className="mono" style={{ textAlign: 'right' }}>{g.n}</td></tr>)}</tbody></table>
         </section>
       </div>
+      <div style={{ marginTop: 18 }}><Surveys /></div>
     </>
   )
 }

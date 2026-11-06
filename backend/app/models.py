@@ -77,6 +77,11 @@ class User(Base):
     consented_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     consent_version: Mapped[str | None] = mapped_column(String(20))
     research_consent: Mapped[bool] = mapped_column(Boolean, default=False)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    whatsapp_opt_in: Mapped[bool] = mapped_column(Boolean, default=False)
+    emergency_name: Mapped[str | None] = mapped_column(String(120))
+    emergency_phone: Mapped[str | None] = mapped_column(String(20))
 
     profile: Mapped[Profile | None] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
     memberships: Mapped[list[CircleMember]] = relationship(back_populates="user", cascade="all, delete-orphan",
@@ -289,4 +294,64 @@ class MatchRun(Base):
     circles_created: Mapped[int] = mapped_column(Integer)
     students_matched: Mapped[int] = mapped_column(Integer)
     metrics: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SosAlert(Base):
+    """SOS pressed by a student (proposal Appendix D)."""
+
+    __tablename__ = "sos_alerts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    circle_id: Mapped[int | None] = mapped_column(ForeignKey("circles.id", ondelete="SET NULL"))
+    message: Mapped[str] = mapped_column(Text, default="")
+    route: Mapped[str] = mapped_column(String(300), default="")  # circle's pickup areas -> campus
+    handled: Mapped[bool] = mapped_column(Boolean, default=False)
+    handled_note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class TripRating(Base):
+    """1-5 stars one member gives another after a confirmed trip (feeds the trust score)."""
+
+    __tablename__ = "trip_ratings"
+    __table_args__ = (UniqueConstraint("trip_id", "rater_id", "ratee_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    trip_id: Mapped[int] = mapped_column(ForeignKey("trips.id", ondelete="CASCADE"))
+    rater_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    ratee_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    stars: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Notification(Base):
+    """Outbox of every WhatsApp message and email (status "mock" when the service isn't configured)."""
+
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    channel: Mapped[str] = mapped_column(String(20))  # whatsapp | email
+    to: Mapped[str] = mapped_column(String(254))
+    template: Mapped[str] = mapped_column(String(60))
+    body: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(20), default="queued")  # sent | mock | failed
+    error: Mapped[str | None] = mapped_column(Text)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    dedupe: Mapped[str | None] = mapped_column(String(120), unique=True)  # stops repeat reminders
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SurveyResponse(Base):
+    """Evaluation surveys (proposal 14.8): SUS usability, safety perception, monthly spending."""
+
+    __tablename__ = "survey_responses"
+    __table_args__ = (UniqueConstraint("user_id", "kind"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(20))  # sus | safety | spend_before | spend_after
+    answers: Mapped[dict] = mapped_column(JSON, default=dict)
+    score: Mapped[float | None] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

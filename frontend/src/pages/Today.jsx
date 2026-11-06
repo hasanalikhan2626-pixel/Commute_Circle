@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../auth'
 import { api, fmt, k1, rs, sa } from '../api'
 import Map from '../components/Map'
+import Sos from '../components/Sos'
 import { useToast } from '../components/Toast'
 import { Av, Err, Loading, useLoad } from '../components/ui'
 
@@ -49,7 +50,9 @@ export default function Today() {
   return (
     <div className="cols">
       <section className="stack">
+        <div className="row" style={{ justifyContent: 'space-between' }}><p className="eyebrow" style={{ margin: 0 }}>Travelling by {d.mode}</p><Sos /></div>
         {card}
+        {t?.confirmed && t.my_status === 'went' && <RateCard t={t} members={d.members} onDone={reload} />}
         {d.seat_requests.map((s) => (
           <div key={s.id} className="card row" style={{ justifyContent: 'space-between' }}>
             <div><p className="eyebrow">One-day seat request</p><p className="q" style={{ margin: '2px 0 0' }}>{s.name} from {sa(s.area)} would like a seat today</p></div>
@@ -129,6 +132,32 @@ function SeatFinder({ open, setOpen, pending, onChange }) {
       {open && (opts?.length
         ? opts.map((x) => <div className="who-row" key={x.circle_id}><span>{x.members.join(', ')}<br /><span className="sub">{sa(x.area)} · {x.on_way ? 'on your way' : k1(x.near_km) + ' km away'} · arrives {x.arrive} · {x.free} seat{x.free > 1 ? 's' : ''} free</span></span><button className="btn sm primary" onClick={() => request(x.circle_id)}>Request</button></div>)
         : <p className="hint" style={{ marginTop: 8 }}>No circle with a free seat near you today.</p>)}
+    </div>
+  )
+}
+
+function RateCard({ t, members, onDone }) {
+  const others = members.filter((m) => !m.me && m.status === 'went')
+  const [stars, setStars] = useState(Object.fromEntries(others.map((m) => [m.user_id, t.rated?.[m.user_id] || 0])))
+  const toast = useToast()
+  if (!others.length) return null
+  const done = others.every((m) => t.rated?.[m.user_id])
+  const save = async () => {
+    const ratings = others.filter((m) => stars[m.user_id]).map((m) => ({ user_id: m.user_id, stars: stars[m.user_id] }))
+    if (!ratings.length) { toast('Tap the stars first'); return }
+    try { await api('/api/today/rate', { method: 'POST', body: { ratings } }); toast('Thanks. Ratings build each member’s trust score.'); onDone() } catch (e) { toast(e.message) }
+  }
+  return (
+    <div className="card">
+      <p className="q" style={{ margin: 0 }}>{done ? 'You rated today’s ride' : 'Rate today’s ride'} <span className="hint">(private)</span></p>
+      {others.map((m) => (
+        <div className="who-row" key={m.user_id}><span>{m.name}</span>
+          <span className="stars" role="radiogroup" aria-label={`Rate ${m.name}`}>{[1, 2, 3, 4, 5].map((n) => (
+            <button key={n} className={n <= stars[m.user_id] ? 'on' : ''} aria-label={`${n} star${n > 1 ? 's' : ''}`} aria-checked={stars[m.user_id] === n} role="radio"
+              onClick={() => setStars({ ...stars, [m.user_id]: n })}>★</button>))}</span></div>
+      ))}
+      <div className="row" style={{ marginTop: 8 }}><button className="btn sm primary" onClick={save}>{done ? 'Update ratings' : 'Send ratings'}</button>
+        <span className="hint">Only Student Affairs sees individual ratings.</span></div>
     </div>
   )
 }

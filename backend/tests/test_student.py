@@ -247,3 +247,47 @@ def test_passenger_pays_modes_do_not_charge_the_provider(client):
     assert m["balance"] == 200  # two passengers x Rs 100; the host isn't charged their own share
     others = [h for h in hs if h is not hh]
     assert all(client.get("/api/money", headers=h).json()["balance"] == -100 for h in others)
+
+
+def test_sos_alerts_student_affairs(client, admin, monkeypatch):
+    monkeypatch.setenv("CC_SECURITY_PHONE", "021-111-222-333")
+    hs = [student(client, i) for i in range(1, 3)]
+    circle_of(client, hs)
+    client.patch("/api/auth/me", json={"emergency_name": "Ammi", "emergency_phone": "0333 7654321"}, headers=hs[0])
+    r = client.post("/api/sos", json={"message": "Car broke down on Korangi Road"}, headers=hs[0]).json()
+    assert [c["number"] for c in r["call"]] == ["15", "1122", "021-111-222-333"]
+    sos = client.get("/api/admin/reports", headers=admin).json()["sos"][0]
+    assert sos["handled"] is False and "BIC campus" in sos["route"] and sos["message"].startswith("Car")
+    out = client.get("/api/admin/outbox", headers=admin).json()
+    assert any(m["template"] == "cc_sos" and m["to"] == "+923337654321" and m["status"] == "mock" for m in out["messages"])
+    client.patch(f"/api/admin/sos/{sos['id']}", json={"handled": True, "note": "Called the student"}, headers=admin)
+    assert client.get("/api/admin/usage", headers=admin).json()["open_sos"] == 0
+
+
+def test_ratings_build_bayesian_trust(client):
+    from app.services.trips import trust_score
+
+    assert trust_score([], 0, 0) == 4.0  # priors: 4.0 stars and 80 % reliability -> 4.0
+    assert trust_score([5] * 20, 20, 0) > 4.7 and trust_score([2] * 10, 5, 5) < 3.0
+    hs = [student(client, i) for i in range(1, 3)]
+    circle_of(client, hs)
+    other = me(client, hs[1])["id"]
+    assert client.post("/api/today/rate", json={"ratings": [{"user_id": other, "stars": 5}]}, headers=hs[0]).status_code == 409
+    client.post("/api/today/yes", headers=hs[0])
+    assert client.post("/api/today/rate", json={"ratings": [{"user_id": other, "stars": 5}]}, headers=hs[0]).status_code == 201
+    assert client.get("/api/today", headers=hs[0]).json()["trip"]["rated"] == {str(other): 5}
+    m = next(x for x in client.get("/api/circle", headers=hs[0]).json()["members"] if x["user_id"] == other)
+    assert m["ratings"] == 1 and m["trust"] > 4.0
+
+
+def test_surveys_and_sus_scoring(client, admin):
+    from app.services.surveys import sus_score
+
+    assert sus_score([5, 1] * 5) == 100 and sus_score([1, 5] * 5) == 0 and sus_score([3] * 10) == 50
+    hs = [student(client, i) for i in range(1, 3)]
+    s = client.get("/api/surveys", headers=hs[0]).json()
+    assert s["due"] == ["spend_before"] and len(s["sus_items"]) == 10
+    assert client.post("/api/surveys/spend_before", json={"amount_pkr": 20000}, headers=hs[0]).status_code == 201
+    assert client.post("/api/surveys/sus", json={"answers": [4, 2] * 5}, headers=hs[0]).status_code == 409  # needs 5 trips
+    ev = {r["metric"]: r for r in client.get("/api/admin/evaluation", headers=admin).json()}
+    assert ev["Matching success rate"]["target"] == ">= 75%" and ev["SUS usability score"]["value"] is None

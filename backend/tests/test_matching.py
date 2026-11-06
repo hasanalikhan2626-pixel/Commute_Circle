@@ -240,3 +240,14 @@ def test_cost_card_matches_appendix_c():
     car = cost_card("Classmate drives", 12, 4, 352.59, 12)
     assert car["total"] == round(12 / 12 * 352.59) and car["payers"] == 4  # fuel split with the driver
     assert payers("Family driver", 4) == 3 and payers("Rickshaw", 3) == 3
+
+
+def test_privacy_simulation_runs():
+    from app.matching import roads
+    from app.privacy_sim import simulate
+
+    rows = simulate(n=40, datasets=1, spreads=(1.0,))
+    by = {r["level"]: r for r in rows}
+    assert by["exact"]["route_penalty_mean"] == 0 and by["exact"]["walk_m_mean_mean"] == 0
+    assert by["area"]["k_anonymity_mean"] >= by["exact"]["k_anonymity_mean"] == 1
+    assert roads.using_matrix(CAMPUS)  # the simulation restores the road table afterwards

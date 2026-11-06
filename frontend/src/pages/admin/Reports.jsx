@@ -19,6 +19,14 @@ export default function Reports() {
       <h2>Reports</h2>
       <p className="lead">Reports need a decision. Private negative feedback is shown below for context; it is never visible to other students.</p>
       <div className="stack">
+        {d.sos.map((a) => (
+          <section key={a.id} className={`card ${a.handled ? '' : 'alarm'}`}>
+            <div className="row" style={{ justifyContent: 'space-between' }}><h3>🚨 SOS from {a.name}</h3><span className={`badge ${a.handled ? 'ok' : 'bad'}`}>{a.handled ? 'Handled' : 'Needs action'}</span></div>
+            <p style={{ margin: '8px 0' }}>{a.message || 'No message.'}</p>
+            <p className="hint" style={{ marginBottom: 12 }}>Route: {a.route || '—'} · {when(a.created_at)}{a.phone && <> · <a href={`tel:${a.phone}`}>{a.phone}</a></>}{a.note && <> · Note: {a.note}</>}</p>
+            {!a.handled && <button className="btn sm primary" onClick={async () => { const note = prompt('What was done? (for the record)') ?? ''; await api(`/api/admin/sos/${a.id}`, { method: 'PATCH', body: { handled: true, note } }); reload(); toast('SOS marked handled') }}>Mark handled</button>}
+          </section>
+        ))}
         {d.reports.length ? d.reports.map((r) => (
           <section className="card" key={r.id}>
             <div className="row" style={{ justifyContent: 'space-between' }}><h3>{r.reason}</h3><span className={`badge ${r.status === 'open' ? 'bad' : 'ok'}`}>{label[r.status]}</span></div>

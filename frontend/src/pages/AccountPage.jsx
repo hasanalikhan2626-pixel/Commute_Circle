@@ -8,12 +8,12 @@ import { Err } from '../components/ui'
 export default function AccountPage() {
   const { user, refresh, logout } = useAuth()
   const toast = useToast()
-  const [f, setF] = useState({ full_name: user.full_name, phone: user.phone || '' })
+  const [f, setF] = useState({ full_name: user.full_name, phone: user.phone || '', emergency_name: user.emergency_name || '', emergency_phone: user.emergency_phone || '' })
   const [err, setErr] = useState('')
   const [del, setDel] = useState(null)
   const save = async (e) => {
     e.preventDefault(); setErr('')
-    try { await api('/api/auth/me', { method: 'PATCH', body: { full_name: f.full_name, phone: f.phone || null } }); await refresh(); toast('Saved') } catch (ex) { setErr(ex.message) }
+    try { await api('/api/auth/me', { method: 'PATCH', body: { full_name: f.full_name, phone: f.phone || null, emergency_name: f.emergency_name || null, emergency_phone: f.emergency_phone || null } }); await refresh(); toast('Saved') } catch (ex) { setErr(ex.message) }
   }
   const research = async (on) => { await api('/api/auth/me', { method: 'PATCH', body: { research_consent: on } }); await refresh(); toast(on ? 'Thanks for helping the research' : 'You’ve opted out of research use') }
   const exportData = async () => {
@@ -34,11 +34,20 @@ export default function AccountPage() {
         <form className="card stack" onSubmit={save}>
           <label className="f">Full name<input type="text" required minLength={2} value={f.full_name} onChange={(e) => setF({ ...f, full_name: e.target.value })} /></label>
           <label className="f">Mobile<input type="tel" value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} placeholder="0300 1234567" /></label>
+          {user.role !== 'admin' && <>
+            <p className="q" style={{ margin: '8px 0 0' }}>Emergency contact <span className="hint">(messaged if you press SOS)</span></p>
+            <div className="grid2">
+              <label className="f">Name<input type="text" value={f.emergency_name} onChange={(e) => setF({ ...f, emergency_name: e.target.value })} placeholder="e.g. Ammi" /></label>
+              <label className="f">Mobile<input type="tel" value={f.emergency_phone} onChange={(e) => setF({ ...f, emergency_phone: e.target.value })} placeholder="0300 1234567" /></label>
+            </div>
+          </>}
           <Err>{err}</Err>
           <div><button className="btn primary">Save</button></div>
         </form>
         {user.role !== 'admin' && (
           <section className="card stack"><h3>Your data</h3>
+            <label className="switch"><input type="checkbox" checked={user.whatsapp_opt_in} onChange={async (e) => { await api('/api/auth/me', { method: 'PATCH', body: { whatsapp_opt_in: e.target.checked } }); await refresh(); toast(e.target.checked ? 'WhatsApp reminders on' : 'WhatsApp reminders off') }} />
+              <span>Send me WhatsApp reminders and daily check-ins <span className="hint">(reply 1 or 2 instead of opening the app)</span></span></label>
             <label className="switch"><input type="checkbox" checked={user.research_consent} onChange={(e) => research(e.target.checked)} />
               <span>Allow my pseudonymised trip data to be used in the project’s research</span></label>
             <p className="hint">Read the <Link to="/privacy">privacy notice</Link> for what this means.</p>

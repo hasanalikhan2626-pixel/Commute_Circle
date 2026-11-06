@@ -23,7 +23,7 @@ from ..matching.compat import allowed, minutes, route_info
 from ..matching.fares import rate, solo_fare
 from ..matching.geo import detour_ratio, haversine_km
 from ..models import (Absence, Circle, CircleStatus, Feedback, MemberStatus, SeatRequest, SeatStatus, Settlement,
-                      Trip, TripMember, TripStatus, User)
+                      Trip, TripMember, TripRating, TripStatus, User)
 from . import clock
 from .candidates import LIVE, to_candidate
 
@@ -174,12 +174,30 @@ def user_stats(db: Session, u: User) -> dict:
         elif tm.status == TripStatus.notgoing:
             ng += 1
     rel = round(went / (went + ns) * 100) if went + ns else None
+    stars = [r.stars for r in db.scalars(select(TripRating).where(TripRating.ratee_id == u.id))]
     tags = Counter(f.tag for f in db.scalars(select(Feedback).where(Feedback.to_id == u.id, Feedback.up.is_(True))))
     badges = [k for k, v in tags.items() if v >= 2 and went >= 5]
     if rel is not None and rel >= 95 and went >= 5 and "Punctual" not in badges:
         badges.insert(0, "Reliable")
     return {"went": went, "noshow": ns, "notgoing": ng, "reliability": rel, "saved": round(saved),
-            "paid": round(paid), "trips14": trips14, "badges": badges, "active": trips14 > 0}
+            "paid": round(paid), "trips14": trips14, "badges": badges, "active": trips14 > 0,
+            "ratings": len(stars), "avg_stars": round(sum(stars) / len(stars), 2) if stars else None,
+            "trust": trust_score(stars, went, ns)}
+
+
+# Bayesian trust score, 0-5 (proposal 14.7 stage 3). Two parts, equally weighted:
+#  * peer ratings: Bayesian average with a prior of 4.0 stars worth 5 ratings, so a few
+#    ratings can't swing it;
+#  * reliability: Beta-Bernoulli estimate of showing up, prior Beta(4, 1) (mean 80 %),
+#    scaled to 0-5.
+RATING_PRIOR, RATING_WEIGHT = 4.0, 5
+SHOW_A, SHOW_B = 4, 1
+
+
+def trust_score(stars: list[int], went: int, noshow: int) -> float:
+    rating = (RATING_PRIOR * RATING_WEIGHT + sum(stars)) / (RATING_WEIGHT + len(stars))
+    reliable = (went + SHOW_A) / (went + noshow + SHOW_A + SHOW_B)
+    return round(0.5 * rating + 0.5 * 5 * reliable, 2)
 
 
 def streak(db: Session, c: Circle) -> int:

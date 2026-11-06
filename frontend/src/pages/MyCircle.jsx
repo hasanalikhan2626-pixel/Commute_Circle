@@ -6,6 +6,7 @@ import { useCircle } from '../App'
 import { useMeta } from '../meta'
 import { useToast } from '../components/Toast'
 import { Av, Err } from '../components/ui'
+import Sos from '../components/Sos'
 import { driveLabel } from './Today'
 
 export default function MyCircle() {
@@ -31,7 +32,7 @@ export default function MyCircle() {
 
   return (
     <>
-      <h2>Your circle</h2>
+      <div className="row" style={{ justifyContent: 'space-between' }}><h2>Your circle</h2><Sos /></div>
       <p className="lead">{c.members.length} members · together since {fmt(c.since)} · travelling by {c.mode}</p>
       <Err>{err}</Err>
       <div className="cols">
@@ -44,7 +45,8 @@ export default function MyCircle() {
                 <div className="facts"><span className="badge">✓ BIC email verified</span>
                   {c.detours?.[s.user_id] > 0 && <span className="badge">+{c.detours[s.user_id]} min detour</span>}
                   <span className={`badge ${s.reliability >= 90 ? 'ok' : s.reliability >= 75 || s.reliability == null ? '' : 'bad'}`}>Shows up {s.reliability == null ? '—' : s.reliability + '%'}</span>
-                  <span className="badge">{s.trips} trips</span>{s.badges.map((b) => <span key={b} className="badge sign">★ {b}</span>)}</div>
+                  <span className="badge">{s.trips} trips</span>
+                  <span className={`badge ${s.trust >= 4.5 ? 'ok' : s.trust < 3.5 ? 'bad' : ''}`} title={`Bayesian trust score from ${s.ratings} rating${s.ratings === 1 ? '' : 's'} and show-ups`}>Trust {s.trust?.toFixed(1)}/5</span>{s.badges.map((b) => <span key={b} className="badge sign">★ {b}</span>)}</div>
                 {!s.me && <div className="row" style={{ marginTop: 8, gap: 6 }}><span className="hint">Private feedback:</span>
                   <button className="opt sm" aria-label={`Thumbs up for ${s.name}`} onClick={() => setFb({ m: s, up: true })}>👍</button>
                   <button className="opt sm" aria-label={`Thumbs down for ${s.name}`} onClick={() => setFb({ m: s, up: false })}>👎</button></div>}

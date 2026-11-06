@@ -123,6 +123,33 @@ def seed(empty: bool = False, weeks: int = 4, rng_seed: int = 20261103) -> None:
         noshows = db.query(TripMember).filter(TripMember.status == TripStatus.noshow).limit(4).all()
         for tm in noshows:
             db.add(Feedback(to_id=tm.user_id, up=False, tag="Didn’t turn up", circle_id=tm.trip.circle_id))
+        # Fictional evaluation data for the demo: star ratings, surveys, approval times.
+        from datetime import timedelta
+
+        from .models import SurveyResponse, TripRating
+        from .services.surveys import sus_score
+
+        for t in db.query(Trip).filter(Trip.confirmed_by.isnot(None)).all():
+            went = [m.user_id for m in t.members if m.status == TripStatus.went]
+            for a in went:
+                for b in went:
+                    if a != b and rng.random() < 0.3:
+                        db.add(TripRating(trip_id=t.id, rater_id=a, ratee_id=b,
+                                          stars=rng.choices([5, 4, 3, 2], weights=[60, 30, 8, 2])[0]))
+        for u in users.values():
+            if u.status == UserStatus.approved:
+                u.approved_at = now
+                u.created_at = now - timedelta(hours=rng.choice([0.5, 1, 2, 3, 5, 8]))
+            if rng.random() < 0.7:
+                before = rng.choice([18000, 22000, 25000, 30000, 35000, 40000])
+                db.add(SurveyResponse(user_id=u.id, kind="spend_before", answers={"amount_pkr": before}, score=before))
+                if u.id in {m.user_id for c in circles for m in c.members} and rng.random() < 0.6:
+                    after = round(before * rng.uniform(0.35, 0.7), -2)
+                    db.add(SurveyResponse(user_id=u.id, kind="spend_after", answers={"amount_pkr": after}, score=after))
+                    sus = [rng.choice([4, 5]) if i % 2 == 0 else rng.choice([1, 2]) for i in range(10)]
+                    db.add(SurveyResponse(user_id=u.id, kind="sus", answers={"items": sus}, score=sus_score(sus)))
+                    saf = [rng.choice([4, 5, 5]) for _ in range(3)]
+                    db.add(SurveyResponse(user_id=u.id, kind="safety", answers={"items": saf}, score=round(sum(saf) / 3, 2)))
         taha = db.query(User).filter_by(full_name="Taha Rizvi").one()
         kashif = db.query(User).filter_by(full_name="Kashif Noor").one()
         db.add(Report(reporter_id=taha.id, reported_id=kashif.id, reason="Repeatedly no-show",

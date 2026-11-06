@@ -18,6 +18,9 @@ export default function Usage() {
         <div className="kpi"><b className="mono">{d.completion}%</b><span>Planned trips completed</span></div>
         <div className="kpi"><b className="mono">{d.circles_travelling}/{d.circles}</b><span>Circles still travelling (last week)</span></div>
         <div className="kpi"><b className="mono" style={{ color: 'var(--bad)' }}>{d.without}</b><span>Still without a circle</span></div>
+        <div className="kpi"><b className="mono">{d.avg_trust ?? '—'}</b><span>Average trust score /5 ({d.trust_45 ?? 0}% at 4.5+)</span></div>
+        <div className="kpi"><b className="mono">{d.women_only_pct ?? '—'}%</b><span>Female students choosing women-only</span></div>
+        <div className="kpi"><b className="mono" style={d.open_sos ? { color: 'var(--bad)' } : {}}>{d.open_sos}</b><span>Open SOS alerts</span></div>
       </div>
       <div className="cols">
         <section className="card"><h3 style={{ marginBottom: 10 }}>Confirmed circle trips per day</h3>

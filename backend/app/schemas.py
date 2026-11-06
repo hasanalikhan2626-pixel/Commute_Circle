@@ -80,8 +80,11 @@ class UserUpdate(BaseModel):
     full_name: str | None = Field(default=None, min_length=2, max_length=120)
     phone: str | None = None
     research_consent: bool | None = None
+    whatsapp_opt_in: bool | None = None
+    emergency_name: str | None = Field(default=None, max_length=120)
+    emergency_phone: str | None = None
 
-    @field_validator("phone")
+    @field_validator("phone", "emergency_phone")
     @classmethod
     def phone_ok(cls, v: str | None) -> str | None:
         return normalise_phone(v) if v else None
@@ -235,3 +238,26 @@ class ReportUpdate(BaseModel):
 
 class ApprovalIn(BaseModel):
     approve: bool
+
+
+class SosIn(BaseModel):
+    message: str = Field(default="", max_length=500)
+
+
+class RatingItem(BaseModel):
+    user_id: int
+    stars: int = Field(ge=1, le=5)
+
+
+class RateIn(BaseModel):
+    ratings: list[RatingItem] = Field(min_length=1, max_length=4)
+
+
+class SosUpdate(BaseModel):
+    handled: bool = True
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class SurveyIn(BaseModel):
+    answers: list[int] = Field(default=[], max_length=10)
+    amount_pkr: int | None = Field(default=None, ge=0, le=500_000)  # spending surveys

@@ -22,7 +22,8 @@ def user_out(u: User) -> dict:
     p = u.profile
     return {
         "id": u.id, "email": u.email, "full_name": u.full_name, "phone": u.phone, "role": u.role.value,
-        "status": u.status.value, "research_consent": u.research_consent,
+        "status": u.status.value, "research_consent": u.research_consent, "email_verified": u.email_verified,
+        "whatsapp_opt_in": u.whatsapp_opt_in, "emergency_name": u.emergency_name, "emergency_phone": u.emergency_phone,
         "gender": p.gender.value if p else None, "programme": p.programme if p else None,
         "year": p.year if p else None, "has_trip": bool(p and p.area and p.schedule and p.methods),
     }
@@ -64,7 +65,7 @@ def me(user: User = Depends(current_user)):
 @router.patch("/me")
 def update_me(body: UserUpdate, user: User = Depends(current_user), db: Session = Depends(get_db)):
     for k, v in body.model_dump(exclude_unset=True).items():
-        if v is not None or k == "research_consent":
+        if v is not None or k in ("emergency_name", "emergency_phone"):
             setattr(user, k, v)
     db.commit()
     return user_out(user)

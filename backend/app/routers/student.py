@@ -14,9 +14,9 @@ from ..deps import current_user
 from ..matching.compat import (DAYS, DRIVE_MODES, METHODS, circle_fit, fit_label, group_days, pair_fit,
                               rider_detours_min, travel_modes)
 from ..models import (Absence, Circle, CircleStatus, Feedback, MemberStatus, Report, RotaEntry, SeatRequest,
-                      SeatStatus, Settlement, Trip, TripStatus, User)
-from ..schemas import (AcceptIn, DayIn, FareIn, FeedbackIn, GoingIn, ModeIn, ReportIn, RespondIn, SeatIn, SettleIn,
-                       TripIn)
+                      SeatStatus, Settlement, Trip, TripRating, TripStatus, User)
+from ..schemas import (AcceptIn, DayIn, FareIn, FeedbackIn, GoingIn, ModeIn, RateIn, ReportIn, RespondIn, SeatIn,
+                       SettleIn, SosIn, SurveyIn, TripIn)
 from ..services import circles as svc
 from ..services import clock, rota, trips
 from ..services.candidates import LIVE, live_circles_of, rules_for, to_candidate
@@ -149,7 +149,8 @@ def _member_out(db, c: Circle, u: User, me: User, pickup: int, reveal: bool) -> 
             "me": u.id == me.id, "programme": prog(u.profile), "year": u.profile.year, "area": u.profile.area,
             "phone": u.phone if reveal and u.id != me.id else None, "pickup": pickup,
             "status": next(m.status.value for m in c.members if m.user_id == u.id),
-            "reliability": st["reliability"], "trips": st["went"], "badges": st["badges"],
+            "reliability": st["reliability"], "trips": st["went"], "badges": st["badges"], "trust": st["trust"],
+            "ratings": st["ratings"],
             "coords": area_coords(u.profile.area)}
 
 
@@ -298,6 +299,8 @@ def today_view(user: User = Depends(current_user), db: Session = Depends(get_db)
             "default_payer": (rt_today.user_id if (rt_today := (db.scalar(select(RotaEntry).filter_by(circle_id=c.id, day=day))
                               if c.mode in DRIVE_MODES else None)) and rt_today.user_id else user.id),
             "cost": trips.circle_cost(c),
+            "rated": {r.ratee_id: r.stars for r in db.scalars(
+                select(TripRating).where(TripRating.trip_id == t.id, TripRating.rater_id == user.id))},
             "demo_other": next((short(users[m.user_id].full_name) for m in t.members
                                 if m.user_id != user.id and m.status == TripStatus.planned), None),
         }
@@ -542,3 +545,93 @@ def savings(user: User = Depends(current_user), db: Session = Depends(get_db)):
                           "lo": round(min(v)) if v else None, "hi": round(max(v)) if v else None})
     return {"tiles": st, "weeks": weeks, "guide": guide, "area": user.profile.area,
             "in_circle": my_circle(db, user, active_only=True) is not None}
+
+
+# --- Safety: SOS and ratings ---------------------------------------------------
+
+@router.post("/sos", status_code=201)
+def sos(body: SosIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Alert Student Affairs (and, with WhatsApp set up, campus security and the student's
+    emergency contact). The app also shows the emergency numbers to call."""
+    import os
+
+    from ..models import SosAlert
+    from ..services import notify
+
+    c = my_circle(db, user)
+    areas = [short_area(m.user.profile.area) for m in (c.members if c else []) if m.status in LIVE and m.user.profile]
+    route = " → ".join(dict.fromkeys(areas)) + " → BIC campus" if areas else (user.profile.area or "")
+    alert = SosAlert(user_id=user.id, circle_id=c.id if c else None, message=body.message, route=route)
+    db.add(alert)
+    db.flush()
+    params = [user.full_name, route or "unknown route", clock.today().isoformat()]
+    targets = [os.environ.get("CC_SECURITY_WHATSAPP")] + ([user.emergency_phone] if user.emergency_phone else [])
+    for to in filter(None, targets):
+        notify.whatsapp(db, to, "cc_sos", params, user_id=user.id)
+    db.commit()
+    security = os.environ.get("CC_SECURITY_PHONE")
+    return {"alert_id": alert.id, "call": [{"label": "Police", "number": "15"}, {"label": "Rescue", "number": "1122"}]
+            + ([{"label": "BIC campus security", "number": security}] if security else [])}
+
+
+@router.post("/today/rate", status_code=201)
+def rate_today(body: RateIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    c, t = _today_trip(db, user)
+    went = {m.user_id for m in t.members if m.status == TripStatus.went}
+    if not t.confirmed_by or user.id not in went:
+        raise HTTPException(409, "You can rate today's ride once it's confirmed and you travelled")
+    for r in body.ratings:
+        if r.user_id == user.id or r.user_id not in went:
+            raise HTTPException(422, "You can only rate classmates who travelled with you today")
+        row = db.scalar(select(TripRating).filter_by(trip_id=t.id, rater_id=user.id, ratee_id=r.user_id))
+        if row:
+            row.stars = r.stars
+        else:
+            db.add(TripRating(trip_id=t.id, rater_id=user.id, ratee_id=r.user_id, stars=r.stars))
+    db.commit()
+    return {"ok": True}
+
+
+# --- Evaluation surveys ---------------------------------------------------------
+
+@router.get("/surveys")
+def survey_status(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from ..models import SurveyResponse
+    from ..services import surveys as sv
+
+    done = {r.kind: r for r in db.scalars(select(SurveyResponse).where(SurveyResponse.user_id == user.id))}
+    trips_done = trips.user_stats(db, user)["went"]
+    ready = trips_done >= sv.AFTER_MIN_TRIPS
+    return {"sus_items": sv.SUS_ITEMS, "safety_items": sv.SAFETY_ITEMS, "trips": trips_done, "min_trips": sv.AFTER_MIN_TRIPS,
+            "due": [k for k in ("spend_before",) if k not in done] + ([k for k in ("sus", "safety", "spend_after")
+                                                                    if k not in done] if ready else []),
+            "done": {k: {"score": r.score, "created_at": r.created_at} for k, r in done.items()}}
+
+
+@router.post("/surveys/{kind}", status_code=201)
+def survey_submit(kind: str, body: SurveyIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from ..models import SurveyResponse
+    from ..services import surveys as sv
+
+    if kind not in ("sus", "safety", "spend_before", "spend_after"):
+        raise HTTPException(404, "Unknown survey")
+    if kind in ("sus", "safety", "spend_after") and trips.user_stats(db, user)["went"] < sv.AFTER_MIN_TRIPS:
+        raise HTTPException(409, f"This survey opens after {sv.AFTER_MIN_TRIPS} trips with your circle")
+    try:
+        if kind == "sus":
+            score, answers = sv.sus_score(body.answers), {"items": body.answers}
+        elif kind == "safety":
+            score, answers = sv.safety_score(body.answers), {"items": body.answers}
+        else:
+            if body.amount_pkr is None:
+                raise ValueError("Enter an amount in Rs")
+            score, answers = float(body.amount_pkr), {"amount_pkr": body.amount_pkr}
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    row = db.scalar(select(SurveyResponse).filter_by(user_id=user.id, kind=kind))
+    if row:
+        row.answers, row.score = answers, score
+    else:
+        db.add(SurveyResponse(user_id=user.id, kind=kind, answers=answers, score=score))
+    db.commit()
+    return {"score": score}

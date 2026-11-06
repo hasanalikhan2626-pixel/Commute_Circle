@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+from datetime import datetime, timezone
 import hashlib
 import hmac
 import io
@@ -20,9 +21,9 @@ from ..matching.algorithms import ALGORITHMS, EXACT
 from ..matching.compat import DAYS, METHODS
 from ..matching.evaluate import evaluate
 from ..matching import roads
-from ..models import (Circle, CircleStatus, Feedback, MatchRun, Profile, Report, ReportStatus, Role, Trip, TripMember,
-                      TripStatus, User, UserStatus)
-from ..schemas import ApprovalIn, DissolveIn, MatchIn, ReportUpdate
+from ..models import (Circle, CircleStatus, Feedback, MatchRun, Notification, Profile, Report, ReportStatus, Role,
+                      SosAlert, Trip, TripMember, TripStatus, User, UserStatus)
+from ..schemas import ApprovalIn, DissolveIn, MatchIn, ReportUpdate, SosUpdate
 from ..services import circles as svc
 from ..services import clock, trips
 from ..services.candidates import LIVE, matching_pool, rules_for
@@ -49,7 +50,10 @@ def _circle_ids_by_user(db) -> dict[int, int]:
 def usage(db: Session = Depends(get_db), _: User = Depends(admin_user)):
     students = [u for u in _students(db) if u.status == UserStatus.approved]
     in_circle = _circle_ids_by_user(db)
-    active = {u.id for u in students if trips.user_stats(db, u)["active"]}
+    stats = {u.id: trips.user_stats(db, u) for u in students}
+    active = {u.id for u in students if stats[u.id]["active"]}
+    rated = [stats[u.id]["trust"] for u in students if stats[u.id]["went"] or stats[u.id]["ratings"]]
+    women = [u for u in students if u.profile and u.profile.gender.value == "female" and u.profile.area]
     planned = done = 0
     today = clock.today()
     for t in db.scalars(select(Trip)):
@@ -78,6 +82,10 @@ def usage(db: Session = Depends(get_db), _: User = Depends(admin_user)):
             "circles": len(circles), "circles_travelling": travelling,
             "without": sum(1 for u in students if u.id not in in_circle), "per_day": per_day, "areas": areas,
             "pending": sum(1 for u in _students(db) if u.status == UserStatus.pending),
+            "avg_trust": round(sum(rated) / len(rated), 2) if rated else None,
+            "trust_45": round(sum(t >= 4.5 for t in rated) / len(rated) * 100) if rated else None,
+            "women_only_pct": round(sum(u.profile.women_only for u in women) / len(women) * 100) if women else None,
+            "open_sos": len(db.scalars(select(SosAlert).where(SosAlert.handled.is_(False))).all()),
             "open_reports": len(db.scalars(select(Report).where(Report.status == ReportStatus.open)).all())}
 
 
@@ -129,10 +137,12 @@ def health(db: Session = Depends(get_db), _: User = Depends(admin_user)):
         ids = [m.user_id for m in live]
         neg = len(db.scalars(select(Feedback).where(Feedback.up.is_(False), Feedback.to_id.in_(ids))).all())
         rate = round(dn / pl * 100) if pl else 0
+        trusts = [trips.user_stats(db, m.user)["trust"] for m in live]
         rows.append({"circle_id": c.id, "members": [_short(m.user.full_name) for m in live],
+                     "trust": round(sum(trusts) / len(trusts), 2) if trusts else None,
                      "areas": sorted({m.user.profile.area for m in live}), "mode": c.mode, "completed": rate,
                      "noshows": ns, "negative": neg, "streak": trips.streak(db, c),
-                     "check_in": rate < 75 or ns >= 3 or neg >= 2})
+                     "check_in": rate < 75 or ns >= 3 or neg >= 2 or (bool(trusts) and min(trusts) < 3.5)})
     return sorted(rows, key=lambda r: r["completed"])
 
 
@@ -149,6 +159,8 @@ def approve(user_id: int, body: ApprovalIn, db: Session = Depends(get_db), _: Us
     if not u or u.status != UserStatus.pending:
         raise HTTPException(404, "No sign-up waiting with that id")
     u.status = UserStatus.approved if body.approve else UserStatus.rejected
+    if body.approve:
+        u.approved_at = datetime.now(timezone.utc)
     db.commit()
     return user_out(u)
 
@@ -163,7 +175,31 @@ def reports(db: Session = Depends(get_db), _: User = Depends(admin_user)):
     neg = [{"about": name(f.to_id), "tag": f.tag, "from": name(f.from_id) if f.from_id else "Circle member",
             "created_at": f.created_at}
            for f in db.scalars(select(Feedback).where(Feedback.up.is_(False)).order_by(Feedback.id.desc()))]
-    return {"reports": reps, "negative_feedback": neg}
+    sos = [{"id": a.id, "name": name(a.user_id), "phone": getattr(db.get(User, a.user_id), "phone", None) if a.user_id else None,
+            "route": a.route, "message": a.message, "handled": a.handled, "note": a.handled_note, "created_at": a.created_at}
+           for a in db.scalars(select(SosAlert).order_by(SosAlert.handled, SosAlert.id.desc()).limit(50))]
+    return {"reports": reps, "negative_feedback": neg, "sos": sos}
+
+
+@router.patch("/sos/{alert_id}")
+def handle_sos(alert_id: int, body: SosUpdate, db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    a = db.get(SosAlert, alert_id)
+    if not a:
+        raise HTTPException(404, "Alert not found")
+    a.handled, a.handled_note = body.handled, body.note
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/outbox")
+def outbox(db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    """Recent WhatsApp messages and emails; status "mock" means the service isn't configured yet."""
+    from ..services import notify
+
+    return {"whatsapp_ready": notify.whatsapp_ready(), "email_ready": notify.email_ready(),
+            "messages": [{"id": n.id, "channel": n.channel, "to": n.to, "template": n.template, "body": n.body,
+                          "status": n.status, "error": n.error, "created_at": n.created_at}
+                         for n in db.scalars(select(Notification).order_by(Notification.id.desc()).limit(100))]}
 
 
 @router.patch("/reports/{report_id}")
@@ -279,17 +315,74 @@ def research_export(db: Session = Depends(get_db), _: User = Depends(admin_user)
     live = _circle_ids_by_user(db)
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["pid", "programme", "year", "area", "gender", "women_only", "methods", "has_car", "days_per_week",
-                *[f"{d.lower()}_arrive" for d in DAYS], "in_active_circle", "circle_pid", "trips_travelled",
-                "reliability_pct"])
+    w.writerow(["pid", "programme", "year", "area", "gender", "women_only", "methods", "has_car", "has_bike",
+                "days_per_week", *[f"{d.lower()}_arrive" for d in DAYS], "in_active_circle", "circle_pid",
+                "trips_travelled", "reliability_pct", "ratings_received", "trust_score"])
     q = select(Profile).join(User).where(User.research_consent.is_(True), User.status == UserStatus.approved)
     for p in db.scalars(q.order_by(Profile.user_id)):
         sched = p.schedule or {}
         cid = live.get(p.user_id)
         st = trips.user_stats(db, p.user)
         w.writerow([_pseudonym("u", p.user_id), p.programme, p.year, p.area, p.gender.value, int(p.women_only),
-                    "|".join(p.methods or []), int(p.has_car), len(sched),
+                    "|".join(p.methods or []), int(p.has_car), int(bool(p.has_bike)), len(sched),
                     *[sched.get(d, {}).get("in", "") for d in DAYS], int(cid is not None),
-                    _pseudonym("c", cid) if cid else "", st["went"], st["reliability"] if st["reliability"] is not None else ""])
+                    _pseudonym("c", cid) if cid else "", st["went"], st["reliability"] if st["reliability"] is not None else "",
+                    st["ratings"], st["trust"]])
     return Response(buf.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": "attachment; filename=commutecircle-research.csv"})
+
+
+@router.get("/evaluation")
+def evaluation(db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    """The proposal's targets (section 15 and RQ mapping) against live data."""
+    import statistics as st
+
+    from ..matching.compat import rider_detours_min
+    from ..models import SurveyResponse
+    from ..services.candidates import to_candidate
+
+    students = [u for u in _students(db) if u.status == UserStatus.approved and u.profile and u.profile.area]
+    in_circle = _circle_ids_by_user(db)
+    women = [u for u in students if u.profile.gender.value == "female"]
+    det = []
+    active = db.scalars(select(Circle).where(Circle.status == CircleStatus.active)).all()
+    for c in active:
+        g = [to_candidate(m.user.profile) for m in c.members if m.status in LIVE and m.user.profile]
+        if len(g) >= 2:
+            det += list(rider_detours_min(g, CAMPUS(), settings.road_factor, settings.avg_speed_kmh).values())
+    resp = {k: [r for r in db.scalars(select(SurveyResponse).where(SurveyResponse.kind == k))]
+            for k in ("sus", "safety", "spend_before", "spend_after")}
+    sus = [r.score for r in resp["sus"]]
+    fem_ids = {u.id for u in women}
+    safety_f = [r.score for r in resp["safety"] if r.user_id in fem_ids]
+    before = {r.user_id: r.score for r in resp["spend_before"]}
+    paired = [(before[r.user_id], r.score) for r in resp["spend_after"] if r.user_id in before and before[r.user_id] > 0]
+    saving = [1 - a / b for b, a in paired]
+    stats = [trips.user_stats(db, u) for u in students]
+    rated = [s["trust"] for s in stats if s["went"] or s["ratings"]]
+    est_saving = []
+    for u, s in zip(students, stats):
+        if s["went"] and s["paid"] and s["saved"]:
+            est_saving.append(s["saved"] / (s["saved"] + s["paid"]))
+    lat = [(u.approved_at - u.created_at).total_seconds() / 3600 for u in _students(db)
+           if u.approved_at and u.created_at and u.approved_at.tzinfo == u.created_at.tzinfo]
+    incidents = len(db.scalars(select(SosAlert)).all()) + len(db.scalars(
+        select(Report).where(Report.reason.in_(["Made me feel unsafe", "Inappropriate behaviour"]))).all())
+    mean = lambda xs: round(st.mean(xs), 2) if xs else None  # noqa: E731
+    pct = lambda xs: round(100 * st.mean(xs), 1) if xs else None  # noqa: E731
+    rows = [
+        ("Matching success rate", ">= 75%", pct([u.id in in_circle for u in students]), "%", "Approved students with trip answers who are in an active circle"),
+        ("Mean rider detour", "<= 12 min", mean(det), "min", "Estimated from OSRM road times x traffic factor"),
+        ("Riders within 12 min", "100%", pct([d <= 12 for d in det]), "%", "Hard rule in matching"),
+        ("Commute cost reduction (survey)", ">= 40%", pct(saving), "%", f"Paired before/after spending, n = {len(saving)}"),
+        ("Commute cost reduction (app estimate)", ">= 40%", pct(est_saving), "%", "Fare shares entered vs travelling alone"),
+        ("Female students in a circle", ">= 85%", pct([u.id in in_circle for u in women]), "%", f"n = {len(women)}"),
+        ("Women-only chosen by female students", "—", pct([u.profile.women_only for u in women]), "%", ""),
+        ("SUS usability score", ">= 78", mean(sus), "/100", f"n = {len(sus)}"),
+        ("Female safety perception", "—", mean(safety_f), "/5", f"n = {len(safety_f)}"),
+        ("Safety incidents", "0", incidents, "", "SOS alerts + reports of unsafe or inappropriate behaviour"),
+        ("Active circles", ">= 20", len(active), "", ""),
+        ("Average trust score", ">= 4.5", mean(rated), "/5", f"n = {len(rated)}"),
+        ("Admin verification latency", "<= 4 h", mean(lat), "h", f"Median {round(st.median(lat), 2) if lat else '—'} h, n = {len(lat)}"),
+    ]
+    return [{"metric": m, "target": t, "value": v, "unit": u, "note": n} for m, t, v, u, n in rows]
