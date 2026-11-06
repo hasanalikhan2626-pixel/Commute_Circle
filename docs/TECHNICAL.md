@@ -36,7 +36,7 @@ React SPA (Vite)  ──HTTPS/JSON──▶  FastAPI  ──SQLAlchemy──▶ 
   | `CC_SECRET_KEY` | dev value | ≥ 32 random characters in production |
   | `CC_DATABASE_URL` | SQLite file | PostgreSQL required in production; `postgres://` URLs accepted |
   | `CC_EMAIL_DOMAINS` | bic.edu.pk | Only these domains can register |
-  | `CC_CAMPUS_LAT/LNG` | 24.7990, 67.1330 | Approximate (~1 km) position of Ibrahim Hyderi Road, Korangi Creek; refine with a map pin |
+  | `CC_CAMPUS_LAT/LNG` | 24.8086702, 67.1217257 | Campus map pin (Ibrahim Hyderi Road, Korangi Creek) |
   | `CC_FUEL_PRICE_PKR` | 352.59 | Petrol price per litre |
   | `CC_FUEL_KM_PER_LITRE` | 12 | Average car efficiency |
 
@@ -114,17 +114,17 @@ The raw output is in `docs/benchmark-synthetic.csv`.
 
 | Pool | Algorithm | Match rate | Avg compatibility | Avg detour km | Fuel saved PKR/wk | Runtime ms |
 |---|---|---|---|---|---|---|
-| 60 | Greedy | 64.7% ± 6.6 | 0.674 ± 0.029 | 2.86 ± 0.57 | 30,212 ± 8,446 | 5 |
-| 60 | k-means | 45.3% ± 4.3 | **0.728** ± 0.044 | **2.19** ± 0.60 | 22,674 ± 5,843 | 9 |
-| 60 | Compatibility | **66.0%** ± 8.0 | 0.653 ± 0.036 | 3.30 ± 0.37 | **31,943** ± 7,990 | 13 |
-| 200 | Greedy | **83.4%** ± 2.2 | 0.727 ± 0.020 | 2.94 ± 0.20 | 148,218 ± 9,447 | 32 |
-| 200 | k-means | 74.0% ± 4.7 | **0.762** ± 0.019 | **1.62** ± 0.36 | 143,981 ± 17,227 | 253 |
-| 200 | Compatibility | 79.3% ± 2.8 | 0.726 ± 0.025 | 2.78 ± 0.06 | **153,971** ± 19,031 | 127 |
+| 60 | Greedy | 64.3% ± 5.5 | 0.680 ± 0.034 | 3.16 ± 0.67 | 24,928 ± 7,438 | 5 |
+| 60 | k-means | 43.7% ± 5.7 | **0.745** ± 0.051 | **2.56** ± 0.81 | 17,231 ± 6,007 | 10 |
+| 60 | Compatibility | **64.7%** ± 5.2 | 0.668 ± 0.032 | 3.37 ± 0.42 | **24,973** ± 5,566 | 15 |
+| 200 | Greedy | **82.2%** ± 2.5 | 0.722 ± 0.015 | 3.33 ± 0.09 | 128,083 ± 12,043 | 33 |
+| 200 | k-means | 73.6% ± 4.4 | **0.771** ± 0.022 | **2.01** ± 0.28 | 123,884 ± 14,466 | 264 |
+| 200 | Compatibility | 77.6% ± 2.9 | 0.727 ± 0.030 | 3.23 ± 0.09 | **131,293** ± 18,214 | 147 |
 
 **Interpretation.**
 * The proposed compatibility method **does not yet beat the greedy baseline** on match
-  rate. At 60 students the difference (66.0% vs 64.7%) is well inside one standard
-  deviation. At 200 students greedy is ahead by about 4 points.
+  rate. At 60 students the difference (64.7% vs 64.3%) is well inside one standard
+  deviation. At 200 students greedy is ahead by about 4.6 points (82.2% vs 77.6%).
 * k-means produces the tightest, most compatible circles with the shortest detours,
   but leaves the most students unmatched, because it groups by geography before
   looking at timetables.
@@ -229,7 +229,6 @@ the student deletes their account. Screenshots are in `docs/screenshots/`.
 * No email verification or notifications yet. Next steps: an email OTP at registration,
   then email or WhatsApp alerts when a circle is proposed.
 * No database migrations yet. Add Alembic before the schema changes in production.
-* Campus coordinates are approximate (~1 km); confirm them with a map pin.
 * The proposed algorithm needs the improvements listed in Section 5.5.
 * The Docker image could not be built in the development sandbox (Docker Hub rate
   limit). It builds on Render and GitHub Actions; check the first deploy log.

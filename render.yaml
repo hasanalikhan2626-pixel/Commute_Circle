@@ -19,8 +19,8 @@ services:
       - key: CC_CORS_ORIGINS
         value: https://commutecircle.onrender.com
       - key: CC_CAMPUS_LAT
-        value: "24.7990"
+        value: "24.8086702"
       - key: CC_CAMPUS_LNG
-        value: "67.1330"
+        value: "67.1217257"
       - key: CC_FUEL_PRICE_PKR
         value: "352.59"

@@ -35,10 +35,10 @@ class Settings:
         default_factory=lambda: tuple(o.strip() for o in _env("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip())
     )
     # Campus: 273/1/A Main Ibrahim Hyderi Road, Korangi Creek, Karachi 75190.
-    # Coordinates are approximate (~1 km); refine with a map pin via CC_CAMPUS_LAT/LNG.
+    # Map pin supplied by the project team.
     campus_name: str = field(default_factory=lambda: _env("CAMPUS_NAME", "BIC Karachi, Korangi Creek"))
-    campus_lat: float = field(default_factory=lambda: float(_env("CAMPUS_LAT", "24.7990")))
-    campus_lng: float = field(default_factory=lambda: float(_env("CAMPUS_LNG", "67.1330")))
+    campus_lat: float = field(default_factory=lambda: float(_env("CAMPUS_LAT", "24.8086702")))
+    campus_lng: float = field(default_factory=lambda: float(_env("CAMPUS_LNG", "67.1217257")))
     # Cost model inputs (PKR per litre of petrol).
     fuel_price_pkr: float = field(default_factory=lambda: float(_env("FUEL_PRICE_PKR", "352.59")))
     fuel_km_per_litre: float = field(default_factory=lambda: float(_env("FUEL_KM_PER_LITRE", "12")))
