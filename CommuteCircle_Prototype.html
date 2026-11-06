@@ -1,0 +1,813 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>:root{color-scheme:light}body{margin:0;font:14px system-ui}[hidden]{display:none!important}</style>
+<title>CommuteCircle</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Figtree:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+/* Layout: sticky app bar; a 3-step student flow (Trip → Match → Group) in one centred column, map beside details on wide screens; admin as tabs */
+:root{
+  --bg:#F2F4F1; --surface:#FFFFFF; --surface-2:#E8EDE9; --line:#D2DBD5;
+  --ink:#14302A; --muted:#566B64; --accent:#0E7A5C; --accent-ink:#FFFFFF; --accent-soft:#DCEFE7;
+  --sign:#E5AE2E; --sign-soft:#FBEFD2; --sign-ink:#5A4106;
+  --bad:#B4372B; --bad-soft:#F8E0DC; --good:#1E7F4E; --map:#F7F9F7; --road:#C9D3CD;
+  --f-display:"Bricolage Grotesque","Segoe UI",system-ui,sans-serif;
+  --f-body:"Figtree","Segoe UI",system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  --r:12px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0E1513; --surface:#15201D; --surface-2:#1D2B27; --line:#2C3C37;
+  --ink:#E4EDE9; --muted:#9BB0A9; --accent:#3BBE93; --accent-ink:#05251B; --accent-soft:#173D30;
+  --sign:#E5AE2E; --sign-soft:#3A2E10; --sign-ink:#F5DD9C;
+  --bad:#F0877B; --bad-soft:#3E1F1B; --good:#5FD39A; --map:#111B18; --road:#2C3C37; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0E1513; --surface:#15201D; --surface-2:#1D2B27; --line:#2C3C37;
+  --ink:#E4EDE9; --muted:#9BB0A9; --accent:#3BBE93; --accent-ink:#05251B; --accent-soft:#173D30;
+  --sign:#E5AE2E; --sign-soft:#3A2E10; --sign-ink:#F5DD9C;
+  --bad:#F0877B; --bad-soft:#3E1F1B; --good:#5FD39A; --map:#111B18; --road:#2C3C37; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.5}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--surface)}
+.wrap{max-width:1080px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header.bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--surface);border-bottom:1px solid var(--line)}
+.bar .top{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-block:10px}
+.brand{display:flex;align-items:center;gap:10px;margin-right:auto}
+.logo{width:36px;height:36px;border-radius:9px;background:var(--accent);display:grid;place-items:center}
+.brand h1{font-family:var(--f-display);font-size:1.3rem;margin:0;letter-spacing:-.01em;line-height:1.1}
+.brand small{display:block;color:var(--muted);font-size:.8rem}
+.tag{font-size:.7rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;padding:3px 8px;border-radius:99px;background:var(--sign-soft);color:var(--sign-ink)}
+.seg{display:inline-flex;background:var(--surface-2);border-radius:99px;padding:3px}
+.seg button{border:0;background:transparent;color:var(--muted);font:600 .9rem var(--f-body);padding:7px 16px;border-radius:99px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 3px rgb(0 0 0/.15)}
+.steps{display:flex;gap:6px;padding-block:0 12px;overflow-x:auto}
+.step{display:flex;align-items:center;gap:8px;border:0;background:none;padding:6px 10px 6px 6px;border-radius:99px;font:600 .92rem var(--f-body);color:var(--muted);cursor:pointer;white-space:nowrap}
+.step .n{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:var(--surface-2);font-size:.8rem}
+.step[aria-current="step"]{background:var(--accent-soft);color:var(--accent)}
+.step[aria-current="step"] .n{background:var(--accent);color:var(--accent-ink)}
+.step.done .n{background:var(--accent-soft);color:var(--accent)}
+.step:disabled{opacity:.45;cursor:not-allowed}
+.sep{align-self:center;width:18px;height:2px;background:var(--line);flex:none}
+main{padding-block:22px 64px}
+h2{font-family:var(--f-display);font-size:clamp(1.4rem,1.1rem + 1.2vw,1.9rem);margin:0 0 6px;text-wrap:balance;letter-spacing:-.015em;line-height:1.15}
+h3{font-family:var(--f-display);font-size:1.12rem;margin:0}
+.lead{color:var(--muted);margin:0 0 20px;max-width:62ch}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:20px}
+.stack{display:flex;flex-direction:column;gap:16px}
+.cols{display:grid;gap:18px;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr)}
+@media (max-width:860px){.cols{grid-template-columns:minmax(0,1fr)}}
+.q{font-weight:700;margin:0 0 4px}
+.hint{color:var(--muted);font-size:.88rem;margin:0}
+select,input[type=text],input[type=number],input[type=time]{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;width:100%}
+input[type=time]{font-family:var(--f-mono);font-size:.95rem}
+:focus-visible{outline:3px solid var(--sign);outline-offset:2px}
+.btn{font:700 .95rem var(--f-body);border-radius:10px;padding:11px 18px;cursor:pointer;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.big{padding:14px 22px;font-size:1rem}
+.btn.danger{color:var(--bad);border-color:var(--bad)}
+.btn.sm{padding:7px 12px;font-size:.86rem}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.opts{display:flex;gap:8px;flex-wrap:wrap}
+.opt{font:600 .92rem var(--f-body);padding:9px 14px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer}
+.opt[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.opt.day{min-width:52px;text-align:center}
+.switch{display:flex;align-items:flex-start;gap:12px;cursor:pointer}
+.switch input{width:20px;height:20px;margin-top:3px;accent-color:var(--accent);flex:none}
+.notice{display:flex;gap:10px;padding:12px 14px;border-radius:10px;background:var(--sign-soft);color:var(--sign-ink);font-size:.9rem}
+.mono{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:.78rem;font-weight:700;padding:3px 9px;border-radius:99px;background:var(--surface-2);color:var(--ink);white-space:nowrap}
+.badge.ok{background:var(--accent-soft);color:var(--accent)}
+.badge.sign{background:var(--sign-soft);color:var(--sign-ink)}
+.badge.bad{background:var(--bad-soft);color:var(--bad)}
+/* map */
+.map{width:100%;height:auto;display:block;border-radius:10px;background:var(--map);border:1px solid var(--line)}
+.map text{font-family:var(--f-body)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:.82rem;color:var(--muted);margin-top:8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+/* match */
+.fit{display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:10px;background:var(--accent-soft)}
+.fit b{font:700 2rem var(--f-display);color:var(--accent);line-height:1}
+.fit .t{font-weight:700}
+.member{display:grid;grid-template-columns:44px minmax(0,1fr) auto;gap:12px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
+.member:first-child{border-top:0}
+.av{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;font:700 .95rem var(--f-display);background:var(--surface-2);color:var(--ink);position:relative}
+.av .o{position:absolute;right:-3px;bottom:-3px;width:20px;height:20px;border-radius:50%;background:var(--accent);color:var(--accent-ink);font:700 .7rem var(--f-body);display:grid;place-items:center;border:2px solid var(--surface)}
+.nm{font-weight:700}
+.sub{color:var(--muted);font-size:.86rem}
+.facts{display:flex;gap:6px;flex-wrap:wrap;margin-top:5px}
+.why{margin-top:4px}
+.why summary{cursor:pointer;font-weight:700;color:var(--accent);font-size:.92rem}
+.bk{width:100%;border-collapse:collapse;font-size:.9rem;margin-top:8px}
+.bk td,.bk th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:left}
+.bk th{font-size:.74rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.mbar{height:8px;border-radius:99px;background:var(--surface-2);overflow:hidden;width:90px}
+.mbar i{display:block;height:100%;background:var(--accent)}
+/* today */
+.today{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr))}
+.tile{padding:14px;border-radius:10px;background:var(--surface-2)}
+.tile b{display:block;font:700 1.35rem var(--f-display)}
+.tile span{color:var(--muted);font-size:.84rem}
+.ck{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ck button{padding:16px;font-size:1.02rem}
+.ck button[aria-pressed="true"].go{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.ck button[aria-pressed="true"].no{background:var(--bad-soft);color:var(--bad);border-color:var(--bad)}
+.who-row{display:flex;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px solid var(--line);font-size:.95rem}
+.st{font-weight:700;font-size:.88rem}
+.st.go{color:var(--good)} .st.no{color:var(--bad)} .st.wait{color:var(--muted)}
+.tt{width:100%;border-collapse:collapse;font-size:.92rem}
+.tt th{text-align:left;font-size:.74rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:8px;border-bottom:1px solid var(--line)}
+.tt td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+.scroll{overflow-x:auto}
+.acct{display:flex;align-items:center;gap:8px;font-size:.82rem;color:var(--muted);font-weight:600}.acct select{width:auto;max-width:210px;padding:7px 10px;font-size:.88rem}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
+.kpi{padding:14px 16px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
+.kpi b{display:block;font:700 1.8rem var(--f-display)}
+.kpi span{color:var(--muted);font-size:.86rem}
+.atabs{display:flex;gap:4px;padding-block:0 0;overflow-x:auto}
+.atabs button{border:0;background:none;font:600 .95rem var(--f-body);color:var(--muted);padding:10px 12px;border-bottom:3px solid transparent;cursor:pointer;white-space:nowrap}
+.atabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+.empty{color:var(--muted);text-align:center;padding:28px}
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(20px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:12px 18px;border-radius:10px;font-weight:600;opacity:0;transition:opacity .2s;pointer-events:none;max-width:calc(100% - 32px);z-index:20}
+#toast.on{opacity:1}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+@media (max-width:560px){.brand small{display:none}.card{padding:16px}.tag{display:none}}
+
+.hero{border-radius:16px;padding:22px;display:flex;flex-direction:column;gap:14px;border:1px solid var(--line);background:var(--surface)}
+.hero.ask{background:var(--accent-soft);border-color:var(--accent)}
+.hero.done{background:var(--surface);border-color:var(--accent)}
+.hero h2{margin:2px 0 4px}
+.eyebrow{font-size:.76rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0}
+.big{font-size:1.05rem;margin:4px 0 0}
+.link{background:none;border:0;padding:0;color:var(--accent);font:700 .92rem var(--f-body);cursor:pointer;text-align:left;text-decoration:underline;text-underline-offset:3px}
+.ck{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tiles{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr))}
+.tile.accent{background:var(--accent-soft)} .tile.accent b{color:var(--accent)}
+.opt.ghost{border-style:dashed;color:var(--muted)}
+.opt.sm{padding:5px 10px;font-size:1rem}
+.av.sm{width:34px;height:34px;font-size:.8rem}
+.member2{display:grid;grid-template-columns:44px minmax(0,1fr);gap:12px;align-items:start}
+.fare{border-color:var(--sign);background:var(--sign-soft)}
+.wk{display:grid;grid-template-columns:62px minmax(0,1fr);gap:10px;align-items:center;margin-bottom:10px}
+.bars{display:flex;flex-direction:column;gap:4px}
+.sbar{height:20px;border-radius:5px;min-width:2px;position:relative}
+.sbar span{position:absolute;left:8px;top:1px;font:600 .78rem var(--f-mono);color:var(--ink);white-space:nowrap}
+.sbar.solo{background:var(--road)} .sbar.paid{background:var(--accent)} .sbar.paid span{color:var(--accent-ink)}
+.daybars{display:flex;align-items:flex-end;gap:4px;height:170px;padding-top:18px}
+.db{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;position:relative;min-width:0}
+.db i{display:block;width:100%;background:var(--accent);border-radius:4px 4px 0 0;min-height:2px}
+.db .v{font-size:.68rem;color:var(--muted)} .db .l{font-size:.68rem;color:var(--muted);margin-top:4px}
+.db:last-child i{background:var(--sign)}
+.hero.quiet{background:var(--surface-2)}
+[hidden]{display:none!important}
+.wa{background:var(--surface-2);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:6px;font-size:.88rem}
+.bub{max-width:85%;padding:7px 10px;border-radius:10px;background:var(--surface);border:1px solid var(--line)}
+.bub.out{align-self:flex-end;background:var(--accent-soft);border-color:var(--accent);font-family:var(--f-mono)}
+</style>
+<header class="bar">
+  <div class="wrap top">
+    <div class="brand">
+      <div class="logo" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 22 22"><circle cx="11" cy="11" r="7.5" fill="none" stroke="#fff" stroke-width="2" stroke-dasharray="3 2.6"/><circle cx="11" cy="3.5" r="2.3" fill="#fff"/><circle cx="4.5" cy="15" r="2.3" fill="#fff"/><circle cx="17.5" cy="15" r="2.3" fill="#fff"/></svg></div>
+      <div><h1>CommuteCircle</h1><small>Travel to campus with classmates on your route · BIC Karachi</small></div>
+    </div>
+    <span class="tag">Prototype · dummy data</span>
+    <label class="acct"><span>Testing as</span><select id="acct" aria-label="Testing as"></select></label>
+    <div class="seg" role="group" aria-label="View as"><button id="role-student" aria-pressed="true">Student</button><button id="role-admin" aria-pressed="false">Admin</button></div>
+  </div>
+  <div class="wrap" id="subnav"></div>
+</header>
+<main class="wrap" id="view"></main>
+<div id="toast" role="status" aria-live="polite"></div>
+<script>
+/* ===== Geography (approximate centre points, for the prototype only) ===== */
+const CAMPUS={name:'BIC Karachi, Korangi Creek',lat:24.806,lon:67.123};
+const AREAS={
+ 'Clifton Block 5':[24.818,67.030],'DHA Phase 6':[24.803,67.060],'DHA Phase 8':[24.787,67.078],
+ 'Saddar':[24.856,67.022],'PECHS Block 6':[24.866,67.067],'Bahadurabad':[24.880,67.069],'Mehmoodabad':[24.852,67.090],
+ 'Gulshan-e-Iqbal Block 13':[24.914,67.093],'Gulshan-e-Iqbal Block 10':[24.926,67.100],'Gulistan-e-Johar Block 15':[24.910,67.134],
+ 'Nazimabad No. 3':[24.914,67.031],'North Nazimabad Block H':[24.940,67.040],
+ 'Shah Faisal Colony':[24.877,67.156],'Model Colony':[24.896,67.190],'Malir Cantt':[24.940,67.205],
+ 'Korangi No. 5':[24.833,67.138],'Defence View':[24.840,67.080]
+};
+const DAYS=['Mon','Tue','Wed','Thu','Fri'];
+const METHODS=['Shared ride-hailing','Classmate drives','Family driver','Parent drop','Rickshaw'];
+const ROAD=1.35; // road distance ≈ straight line × 1.35
+
+/* ===== Dummy students ===== */
+const DM={M:'Mon',T:'Tue',W:'Wed',H:'Thu',F:'Fri'};
+function mk(id,name,g,prog,year,area,days,arr,lv,wo,meth,status='approved',over={}){
+  const tt={}; DAYS.forEach(d=>tt[d]={on:false,in:arr,out:lv});
+  [...days].forEach(c=>tt[DM[c]].on=true);
+  Object.entries(over).forEach(([d,v])=>{const [a,b]=v.split('-');tt[d]={on:true,in:a,out:b}});
+  return {id,name,g,prog,year,area,tt,womenOnly:wo,size:4,methods:meth,status,phone:'03'+String(id%10)+(id<10?'0':'')+'-555-'+String(1000+id).slice(1)};
+}
+const SH='Shared ride-hailing',RK='Rickshaw',CD='Classmate drives',PD='Parent drop',FD='Family driver';
+let students=[
+ mk(1,'Ayesha Khan','F','BSc Artificial Intelligence (Essex)',2,'Gulshan-e-Iqbal Block 13','MTWHF','08:30','14:00',true,[SH,RK],'approved',{Tue:'10:00-16:00',Thu:'10:00-16:00'}),
+ mk(2,'Hira Siddiqui','F','BBA (Essex)',1,'Gulshan-e-Iqbal Block 13','MTWHF','08:40','14:00',true,[SH],'approved',{Tue:'10:10-16:00',Thu:'09:55-16:00'}),
+ mk(3,'Iqra Farooq','F','BSc Artificial Intelligence (Essex)',1,'Gulshan-e-Iqbal Block 10','MTWF','08:25','14:00',true,[SH,RK],'approved',{Tue:'10:00-16:00'}),
+ mk(4,'Zainab Raza','F','BSc Accounting & Finance (Essex)',3,'Gulistan-e-Johar Block 15','MWF','08:35','13:30',true,[SH,PD]),
+ mk(5,'Mahnoor Ali','F','LLB (Essex)',2,'Bahadurabad','MTWH','08:30','14:00',false,[RK,SH],'approved',{Tue:'10:00-16:00',Thu:'10:00-16:00'}),
+ mk(6,'Fatima Noor','F','LLB (Essex)',1,'Gulshan-e-Iqbal Block 13','TH','11:30','17:00',true,[SH]),
+ mk(7,'Sana Javed','F','HND Business (Pearson)',1,'Shah Faisal Colony','MTWH','08:30','14:00',false,[CD,SH]),
+ mk(8,'Areeba Shah','F','BBA (Essex)',3,'DHA Phase 6','MWF','10:00','16:00',true,[FD,SH]),
+ mk(9,'Maryam Yousuf','F','HND Art & Design (Pearson)',1,'Malir Cantt','MTW','08:45','13:30',true,[CD,PD]),
+ mk(10,'Kinza Baig','F','BBA (Essex)',2,'PECHS Block 6','MTH','10:00','16:00',false,[SH]),
+ mk(11,'Rida Kamal','F','BSc Accounting & Finance (Essex)',1,'Mehmoodabad','MWF','08:30','14:00',true,[RK,SH]),
+ mk(12,'Anam Sohail','F','LLB (Essex)',2,'DHA Phase 8','MTWH','10:00','16:00',true,[SH,FD]),
+ mk(13,'Mehwish Arif','F','BSc Artificial Intelligence (Essex)',2,'Model Colony','MWF','08:30','14:00',true,[SH]),
+ mk(14,'Noor Fatima','F','HND Business (Pearson)',1,'Nazimabad No. 3','MTH','08:30','14:00',true,[CD]),
+ mk(15,'Ali Hassan','M','BSc Artificial Intelligence (Essex)',2,'Gulshan-e-Iqbal Block 13','MTWHF','08:30','14:00',false,[SH],'approved',{Tue:'10:00-16:00',Thu:'10:00-16:00'}),
+ mk(16,'Usman Tariq','M','BBA (Essex)',2,'Gulshan-e-Iqbal Block 10','MWF','08:35','14:00',false,[RK]),
+ mk(17,'Rehan Akhtar','M','BBA (Essex)',1,'Gulistan-e-Johar Block 15','MWF','08:30','14:00',false,[SH]),
+ mk(18,'Bilal Ahmed','M','HND Business (Pearson)',2,'North Nazimabad Block H','MTWH','08:30','14:00',false,[CD,RK]),
+ mk(19,'Hamza Qureshi','M','BSc Artificial Intelligence (Essex)',1,'Nazimabad No. 3','MTH','08:30','14:00',false,[CD]),
+ mk(20,'Danish Malik','M','LLB (Essex)',2,'Clifton Block 5','MTW','10:00','16:00',false,[SH]),
+ mk(21,'Saad Iqbal','M','BSc Accounting & Finance (Essex)',2,'PECHS Block 6','TH','08:30','14:00',false,[RK]),
+ mk(22,'Taha Rizvi','M','LLB (Essex)',3,'Bahadurabad','MW','11:30','17:00',false,[RK]),
+ mk(23,'Fahad Javed','M','HND Business (Pearson)',1,'Korangi No. 5','MTWHF','08:30','14:00',false,[RK,CD]),
+ mk(24,'Shoaib Akram','M','BBA (Essex)',3,'Defence View','MWF','08:40','14:00',false,[SH]),
+ mk(25,'Ahmed Raza','M','BSc Artificial Intelligence (Essex)',1,'Saddar','MTWH','08:30','14:00',false,[CD]),
+ mk(26,'Kashif Noor','M','LLB (Essex)',1,'Malir Cantt','MTW','08:45','13:30',false,[SH,CD]),
+ mk(27,'Laiba Hussain','F','LLB (Essex)',1,'Gulistan-e-Johar Block 15','MTWHF','08:30','14:00',true,[SH],'pending'),
+ mk(28,'Omar Sheikh','M','HND Business (Pearson)',1,'Shah Faisal Colony','MT','08:45','13:30',false,[CD],'pending'),
+ mk(29,'Hania Rehman','F','BBA (Essex)',1,'Clifton Block 5','MWF','10:00','16:00',true,[FD],'pending'),
+ mk(30,'Sameer Khan','M','BSc Artificial Intelligence (Essex)',1,'Gulshan-e-Iqbal Block 13','MTWHF','08:30','14:00',false,[SH,RK]),
+ mk(31,'Alishba Tariq','F','BBA (Essex)',2,'Gulshan-e-Iqbal Block 13','MWF','08:20','14:00',false,[SH]),
+ mk(32,'Huzaifa Ali','M','LLB (Essex)',2,'Gulshan-e-Iqbal Block 13','TH','11:30','17:00',false,[RK]),
+ mk(33,'Amna Saleem','F','LLB (Essex)',3,'Gulshan-e-Iqbal Block 10','MTWH','08:40','14:00',true,[SH,PD]),
+ mk(34,'Moiz Ahmed','M','BSc Accounting & Finance (Essex)',2,'Gulshan-e-Iqbal Block 10','MTWHF','08:30','14:00',false,[SH]),
+ mk(35,'Sidra Naveed','F','BBA (Essex)',1,'Gulistan-e-Johar Block 15','MTWHF','08:30','14:00',true,[SH,RK]),
+ mk(36,'Arsalan Shah','M','BSc Artificial Intelligence (Essex)',3,'Gulistan-e-Johar Block 15','MWF','08:45','14:00',false,[SH]),
+ mk(37,'Hareem Zaidi','F','HND Business (Pearson)',2,'Gulistan-e-Johar Block 15','MTWH','10:00','16:00',false,[CD,SH]),
+ mk(38,'Faizan Rauf','M','HND Business (Pearson)',1,'Mehmoodabad','MTWHF','08:30','14:00',false,[RK,CD]),
+ mk(39,'Sadia Khan','F','LLB (Essex)',2,'Mehmoodabad','MWF','08:40','14:00',true,[RK]),
+ mk(40,'Zoya Malik','F','BSc Artificial Intelligence (Essex)',2,'Defence View','MTWH','08:30','14:00',true,[SH]),
+ mk(41,'Junaid Iqbal','M','BBA (Essex)',1,'Defence View','TH','10:00','16:00',false,[SH,RK]),
+ mk(42,'Mariam Aziz','F','BBA (Essex)',1,'DHA Phase 8','MTWH','10:05','16:00',true,[FD,SH]),
+ mk(43,'Hassan Mirza','M','LLB (Essex)',3,'DHA Phase 8','MTWH','10:00','16:00',false,[SH]),
+ mk(44,'Ibrahim Siddiqui','M','BBA (Essex)',2,'DHA Phase 6','MWF','10:00','16:00',false,[SH,FD]),
+ mk(45,'Eman Asif','F','LLB (Essex)',1,'DHA Phase 6','MWF','09:50','16:00',true,[FD]),
+ mk(46,'Natasha Ali','F','BBA (Essex)',2,'Clifton Block 5','MWF','10:10','16:00',false,[SH]),
+ mk(47,'Raza Hamdani','M','BSc Accounting & Finance (Essex)',3,'Clifton Block 5','TH','11:30','17:00',false,[SH]),
+ mk(48,'Umair Khalid','M','HND Business (Pearson)',2,'Saddar','MTWH','08:30','14:00',false,[CD,RK]),
+ mk(49,'Javeria Aslam','F','HND Business (Pearson)',1,'Saddar','MTWH','08:35','14:00',false,[CD]),
+ mk(50,'Ayan Butt','M','BSc Artificial Intelligence (Essex)',1,'PECHS Block 6','MTH','10:00','16:00',false,[SH]),
+ mk(51,'Mahrukh Ali','F','BSc Artificial Intelligence (Essex)',2,'PECHS Block 6','TH','08:30','14:00',true,[RK,SH]),
+ mk(52,'Hafsa Imran','F','BBA (Essex)',1,'Bahadurabad','MTWH','08:30','14:00',true,[RK,SH]),
+ mk(53,'Owais Ahmed','M','LLB (Essex)',2,'Bahadurabad','MW','11:40','17:00',false,[RK]),
+ mk(54,'Rameez Raja','M','BBA (Essex)',3,'Nazimabad No. 3','MTH','08:30','14:00',false,[CD]),
+ mk(55,'Aiman Fatima','F','BSc Artificial Intelligence (Essex)',1,'Nazimabad No. 3','MTH','08:20','14:00',true,[CD,PD]),
+ mk(56,'Sumbul Nadeem','F','LLB (Essex)',2,'North Nazimabad Block H','MTWH','08:30','14:00',true,[CD,SH]),
+ mk(57,'Talha Usmani','M','BSc Artificial Intelligence (Essex)',2,'North Nazimabad Block H','MTWH','08:40','14:00',false,[CD]),
+ mk(58,'Nida Parveen','F','HND Business (Pearson)',2,'Shah Faisal Colony','MTWH','08:30','14:00',true,[CD,RK]),
+ mk(59,'Waqas Ali','M','BBA (Essex)',1,'Shah Faisal Colony','MTWH','08:25','14:00',false,[RK]),
+ mk(60,'Rabia Sultan','F','BSc Accounting & Finance (Essex)',3,'Model Colony','MWF','08:30','14:00',true,[SH]),
+ mk(61,'Adeel Haider','M','HND Business (Pearson)',1,'Model Colony','MWF','08:30','14:00',false,[SH,CD]),
+ mk(62,'Zara Qadir','F','BBA (Essex)',1,'Malir Cantt','MTW','08:40','13:30',true,[CD,PD]),
+ mk(63,'Shahzaib Khan','M','BSc Artificial Intelligence (Essex)',2,'Malir Cantt','MTW','08:50','13:30',false,[SH]),
+ mk(64,'Mubashir Hussain','M','BBA (Essex)',2,'Korangi No. 5','MTWHF','08:30','14:00',false,[RK]),
+ mk(65,'Saima Bano','F','HND Business (Pearson)',1,'Korangi No. 5','MTWHF','08:30','14:00',false,[RK,CD]),
+ mk(70,'Mehak Jamil','F','BBA (Essex)',2,'Gulshan-e-Iqbal Block 10','MTWH','10:00','16:00',false,[SH,FD]),
+ mk(71,'Sara Rehan','F','LLB (Essex)',1,'Gulistan-e-Johar Block 15','MTWH','10:05','16:00',true,[SH]),
+ mk(69,'Saba Irfan','F','LLB (Essex)',2,'Gulshan-e-Iqbal Block 10','TH','11:40','17:00',true,[SH]),
+ mk(66,'Yasir Nawaz','M','LLB (Essex)',1,'Clifton Block 5','MWF','13:00','18:00',false,[SH]),
+ mk(67,'Bushra Kamran','F','BBA (Essex)',1,'Gulistan-e-Johar Block 15','MWF','08:30','14:00',true,[SH],'pending'),
+ mk(68,'Kamran Akmal','M','HND Business (Pearson)',2,'Saddar','MTWH','08:30','14:00',false,[CD],'pending')
+];
+students[0].me=true;
+
+/* ===== Matching ===== */
+const rad=x=>x*Math.PI/180;
+function km(a,b){const R=6371,dl=rad(b[0]-a[0]),dn=rad(b[1]-a[1]);const h=Math.sin(dl/2)**2+Math.cos(rad(a[0]))*Math.cos(rad(b[0]))*Math.sin(dn/2)**2;return 2*R*Math.asin(Math.sqrt(h));}
+const P=s=>AREAS[s.area], C=[CAMPUS.lat,CAMPUS.lon];
+const mins=t=>{const [h,m]=t.split(':').map(Number);return h*60+m};
+function allowed(a,b){ if(a.womenOnly&&b.g!=='F') return false; if(b.womenOnly&&a.g!=='F') return false; return true; }
+// detour: extra distance if one picks up the other on the way to campus (best order)
+function detour(a,b){const ac=km(P(a),C),bc=km(P(b),C),ab=km(P(a),P(b));
+  const viaB=(ab+bc)/ac-1, viaA=(ab+ac)/bc-1; return Math.max(0,Math.min(viaB,viaA));}
+function pair(a,b){
+  if(!allowed(a,b)) return null;
+  const d=km(P(a),P(b)), det=detour(a,b);
+  const route=Math.max(0,40*(1-det/0.35));            // 0% detour → 40, 35%+ → 0
+  const near=Math.max(0,20*(1-(d-1.5)/6.5)), nearS=Math.min(20,near); // ≤1.5 km → 20, ≥8 km → 0
+  const myDays=DAYS.filter(x=>a.tt[x].on);
+  const fits=myDays.map(x=>{ if(!b.tt[x].on) return {x,ok:0};
+    const di=Math.abs(mins(a.tt[x].in)-mins(b.tt[x].in)), dout=Math.abs(mins(a.tt[x].out)-mins(b.tt[x].out));
+    const f=v=>v<=15?1:v<=30?.5:0; return {x,ok:(f(di)*0.7+f(dout)*0.3),di,dout};});
+  const sched=myDays.length?30*fits.reduce((t,f)=>t+f.ok,0)/myDays.length:0;
+  const common=a.methods.filter(m=>b.methods.includes(m)); const pref=common.length?10:0;
+  const total=Math.round(route+nearS+sched+pref);
+  const goodDays=fits.filter(f=>f.ok>=.7).map(f=>f.x);
+  return {total,route:Math.round(route),near:Math.round(nearS),sched:Math.round(sched),pref,d,det,goodDays,common,
+    onWay:det<=0.12};
+}
+const MIN=45;
+function pool(){return students.filter(s=>s.status==='approved'&&!s.me);}
+function buildGroup(seedFirst){
+  const m=me(), target=m.size;
+  let grp=[m]; let cands=pool().filter(c=>{const p=pair(m,c);return p&&p.total>=MIN&&p.goodDays.length>0;});
+  if(seedFirst){ if(!cands.includes(seedFirst)) return null; grp.push(seedFirst); }
+  while(grp.length<target){
+    let best=null,bestV=-1;
+    cands.filter(c=>!grp.includes(c)).forEach(c=>{
+      const ps=grp.map(g=>pair(g,c)); if(ps.some(p=>!p||p.total<MIN-10||!p.goodDays.length)) return;
+      if(!DAYS.some(d=>[...grp,c].every(s=>s.tt[d].on&&Math.abs(mins(s.tt[d].in)-mins(m.tt[d].in))<=20))) return;
+      const v=Math.min(...ps.map(p=>p.total))*0.6+pair(m,c).total*0.4;
+      if(v>bestV){bestV=v;best=c;}});
+    if(!best) break; grp.push(best);
+  }
+  return grp.length>1?grp:null;
+}
+function groupInfo(grp){
+  const m=grp[0];
+  const order=[...grp].sort((a,b)=>km(P(b),C)-km(P(a),C)); // furthest from campus is picked up first
+  let dist=0; for(let i=0;i<order.length-1;i++) dist+=km(P(order[i]),P(order[i+1])); dist+=km(P(order.at(-1)),C);
+  const roadKm=dist*ROAD;
+  const scores=[]; for(let i=0;i<grp.length;i++)for(let j=i+1;j<grp.length;j++){const p=pair(grp[i],grp[j]);scores.push(p?p.total:0);}
+  const fit=Math.round(scores.reduce((t,v)=>t+v,0)/scores.length);
+  const days=DAYS.filter(d=>grp.every(s=>s.tt[d].on&&Math.abs(mins(s.tt[d].in)-mins(m.tt[d].in))<=20));
+  return {order,roadKm,fit,days,soloKm:km(P(m),C)*ROAD};
+}
+const fitLabel=v=>v>=75?'Great fit':v>=60?'Good fit':'Fair fit';
+
+/* ===== Map ===== */
+const BB={la0:24.775,la1:24.950,lo0:67.010,lo1:67.215}, MW=560, MH=420;
+const X=lon=>20+(lon-BB.lo0)/(BB.lo1-BB.lo0)*(MW-40), Y=lat=>20+(BB.la1-lat)/(BB.la1-BB.la0)*(MH-40);
+function mapSVG(opts){
+  const {group=[],order=[],others=[],bubbles=null}=opts;
+  let s=`<svg class="map" viewBox="0 0 ${MW} ${MH}" role="img" aria-label="${bubbles?'Map of members by area':'Map of your group and the route to campus'}">`;
+  for(let i=1;i<6;i++){s+=`<line x1="0" x2="${MW}" y1="${i*MH/6}" y2="${i*MH/6}" stroke="var(--road)" stroke-width=".5"/><line y1="0" y2="${MH}" x1="${i*MW/6}" x2="${i*MW/6}" stroke="var(--road)" stroke-width=".5"/>`;}
+  Object.entries(AREAS).forEach(([n,[la,lo]])=>{ if(bubbles) return;
+    s+=`<circle cx="${X(lo)}" cy="${Y(la)}" r="3" fill="var(--road)"/>`;});
+  if(bubbles){ bubbles.forEach(b=>{const [la,lo]=AREAS[b.a];const r=6+b.n*4;
+      s+=`<circle cx="${X(lo)}" cy="${Y(la)}" r="${r}" fill="var(--accent)" fill-opacity=".18" stroke="var(--accent)"/>`;
+      if(b.u) s+=`<circle cx="${X(lo)}" cy="${Y(la)}" r="${6+b.u*4}" fill="var(--bad)" fill-opacity=".55"/>`;
+      s+=`<text x="${X(lo)+r+4}" y="${Y(la)+4}" font-size="11" fill="var(--muted)">${esc(b.a.replace('Gulshan-e-Iqbal','Gulshan').replace('Gulistan-e-Johar','Johar'))}</text>`;});
+  }
+  others.forEach(o=>{const [la,lo]=P(o);s+=`<circle cx="${X(lo)}" cy="${Y(la)}" r="5" fill="var(--surface)" stroke="var(--muted)" stroke-width="1.5"/>`;});
+  if(order.length){ let d=''; order.forEach((o,i)=>{const [la,lo]=P(o);d+=(i?'L':'M')+X(lo)+' '+Y(la)+' ';}); d+='L'+X(CAMPUS.lon)+' '+Y(CAMPUS.lat);
+    s+=`<path d="${d}" fill="none" stroke="var(--accent)" stroke-width="3" stroke-dasharray="7 5" stroke-linecap="round"/>`;}
+  group.forEach(o=>{const [la,lo]=P(o);const n=order.indexOf(o)+1;
+    s+=`<circle cx="${X(lo)}" cy="${Y(la)}" r="${o.me?11:9}" fill="${o.me?'var(--sign)':'var(--accent)'}" stroke="var(--surface)" stroke-width="2"/>`;
+    if(n) s+=`<text x="${X(lo)}" y="${Y(la)+4}" text-anchor="middle" font-size="11" font-weight="700" fill="${o.me?'#3a2a00':'var(--accent-ink)'}">${n}</text>`;});
+  const used=new Set(); group.forEach(o=>{ if(used.has(o.area)) return; used.add(o.area); const [la,lo]=P(o);
+    s+=`<text x="${X(lo)+14}" y="${Y(la)-10}" font-size="12" font-weight="600" fill="var(--ink)">${esc(o.area.replace('Gulshan-e-Iqbal','Gulshan').replace('Gulistan-e-Johar','Johar'))}</text>`;});
+  const cx=X(CAMPUS.lon),cy=Y(CAMPUS.lat);
+  s+=`<rect x="${cx-11}" y="${cy-11}" width="22" height="22" rx="5" fill="var(--ink)"/><text x="${cx}" y="${cy+4}" text-anchor="middle" font-size="10" font-weight="700" fill="var(--bg)">BIC</text>
+     <text x="${cx+16}" y="${cy+18}" font-size="12" font-weight="700" fill="var(--ink)">Campus</text>`;
+  return s+'</svg>';
+}
+
+/* ===== CommuteCircle prototype logic ===== */
+const SCEN=[[1,'Woman, women-only circle, Gulshan 13 (full history)'],[15,'Man, Gulshan 13 (no circle yet: try matching)'],[20,'Man, Clifton, 10 am classes (no circle yet)'],[8,'Woman, women-only, DHA 6 (has a circle)'],[5,'Woman, mixed circle, Bahadurabad'],[66,'Man, afternoon classes (no match)']];
+const NO_SEED=[15,30,34,16,20,44,43,66,6]; // left without a circle so the matching flow can be tested
+const MODE_RATE={'Shared ride-hailing':{type:'km',v:52},'Rickshaw':{type:'km',v:38},'Classmate drives':{type:'km',v:20},'Family driver':{type:'zero',v:0},'Parent drop':{type:'zero',v:0}};
+let rng=(a=>()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296})(20261103);
+const $=s=>document.querySelector(s);
+const esc=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const ini=n=>n.split(' ').map(w=>w[0]).join('').slice(0,2);
+const short=n=>{const p=n.split(' ');return p[0]+' '+p[1][0]+'.'};
+const sa=a=>a.replace('Gulshan-e-Iqbal','Gulshan').replace('Gulistan-e-Johar','Johar');
+const k1=v=>v.toFixed(1);
+const rs=v=>'Rs '+Math.round(v).toLocaleString('en-PK');
+const median=a=>{if(!a.length)return 0;const s=[...a].sort((x,y)=>x-y),m=s.length>>1;return s.length%2?s[m]:(s[m-1]+s[m])/2;};
+function toast(t){const el=$('#toast');el.textContent=t;el.classList.add('on');clearTimeout(toast.h);toast.h=setTimeout(()=>el.classList.remove('on'),2600);}
+const me=()=>students.find(s=>s.me);
+
+/* ----- dates: last 4 weeks of weekdays up to "today" ----- */
+const dkey=d=>d.toISOString().slice(0,10);
+const DOW=d=>['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()];
+const fmt=d=>DOW(d)+' '+d.getDate()+' '+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+let TODAY=new Date(); TODAY.setHours(12,0,0,0); while([0,6].includes(TODAY.getDay())) TODAY.setDate(TODAY.getDate()-1);
+const TOMORROW=(()=>{const d=new Date(TODAY);do{d.setDate(d.getDate()+1)}while([0,6].includes(d.getDay()));return d;})();
+const PAST=[];{const d=new Date(TODAY);while(PAST.length<20){d.setDate(d.getDate()-1);if(![0,6].includes(d.getDay()))PAST.unshift(new Date(d));}}
+
+/* ----- circles ----- */
+let circles=[]; // {id, members:[], mode, since}
+const circleOf=s=>circles.find(c=>c.members.includes(s));
+function pool(){return students.filter(s=>s.status==='approved'&&!s.me&&!circleOf(s));}
+function buildFor(u,avail,seed,own){
+  const target=u.size; const grp=[u];
+  const cands=avail.filter(c=>c!==u&&(!circleOf(c)||(own&&circleOf(c)===circleOf(u)))).filter(c=>{const p=pair(u,c);return p&&p.total>=MIN&&p.goodDays.length>0;});
+  if(seed){ if(!cands.includes(seed)) return null; grp.push(seed); }
+  while(grp.length<target){let best=null,bv=-1;
+    cands.filter(c=>!grp.includes(c)).forEach(c=>{const ps=grp.map(g=>pair(g,c)); if(ps.some(p=>!p||p.total<MIN-10||!p.goodDays.length)) return;
+      if(!DAYS.some(d=>[...grp,c].every(s=>s.tt[d].on&&Math.abs(mins(s.tt[d].in)-mins(u.tt[d].in))<=20))) return;
+      const v=Math.min(...ps.map(p=>p.total))*0.6+pair(u,c).total*0.4; if(v>bv){bv=v;best=c;}});
+    if(!best) break; grp.push(best);}
+  return grp.length>1?grp:null;
+}
+function travelDays(c){const ref=c.members[0];return DAYS.filter(d=>c.members.filter(s=>s.tt[d].on&&Math.abs(mins(s.tt[d].in)-mins(ref.tt[d].in))<=20).length>=2);}
+function plannedOn(c,s,date){const d=DOW(date);return travelDays(c).includes(d)&&s.tt[d].on&&Math.abs(mins(s.tt[d].in)-mins(c.members[0].tt[d].in))<=20;}
+function fareFor(c,mode,n){const info=groupInfo(c.members);const r=MODE_RATE[mode];
+  if(r.type==='km') return Math.round(info.roadKm*r.v*(0.85+rng()*0.3)/10)*10;
+  if(r.type==='pp') return n*r.v; return 0;}
+
+// seed circles
+(function seed(){
+  const order=students.filter(s=>s.status==='approved'&&!NO_SEED.includes(s.id)).sort((a,b)=>a.id-b.id);
+  let id=1;
+  order.forEach(u=>{ if(circleOf(u)) return;
+    const avail=students.filter(s=>s.status==='approved'&&!NO_SEED.includes(s.id));
+    const g=buildFor(u,avail,null); if(!g) return;
+    const common=METHODS.filter(m=>g.every(s=>s.methods.includes(m)));
+    circles.push({id:id++,members:g,mode:common[0]||g[0].methods[0]||'Shared ride-hailing',since:PAST[0]});
+  });
+})();
+
+/* ----- trips: {date:key, cid, st:Map(member→'went'|'notgoing'|'noshow'|'planned'), confirmedBy, total, mode} ----- */
+let trips=[];
+(function seedTrips(){
+  circles.forEach(c=>{ const flaky=rng()<0.25?c.members[1+Math.floor(rng()*(c.members.length-1))]:null;
+    PAST.forEach(dt=>{ const pl=c.members.filter(s=>plannedOn(c,s,dt)); if(pl.length<2) return;
+      const st=new Map(); pl.forEach(s=>{const r=rng(); const ns=s===flaky?0.22:0.04; st.set(s,r<ns?'noshow':r<ns+0.08?'notgoing':'went');});
+      const went=pl.filter(s=>st.get(s)==='went'); if(!went.length) return;
+      const conf=rng()<0.93; const t={date:dkey(dt),cid:c.id,st,confirmedBy:conf?went[Math.floor(rng()*went.length)]:null,mode:c.mode,total:null};
+      if(conf&&rng()<0.62){ t.total=fareFor(c,c.mode,went.length); t.payer=rng()<0.6?t.confirmedBy:went[Math.floor(rng()*went.length)]; }
+      trips.push(t);});
+  });
+})();
+circles.forEach(c=>{c.settledUntil=dkey(PAST[PAST.length-6]);c.settlements=[];c.rotaOver={};c.weekly=rng()<0.85;});
+// private feedback seeds: positive tags + a few negatives (admin only)
+const TAGS=['Punctual','Friendly','Good communicator','Respectful'];
+let feedback=[]; // {from,to,up,tag,date}
+students.forEach(s=>{ if(!circleOf(s)) return; const n=Math.floor(rng()*6); for(let i=0;i<n;i++) feedback.push({from:null,to:s,up:true,tag:TAGS[Math.floor(rng()*TAGS.length)]}); });
+(function(){const cand=trips.filter(t=>[...t.st.values()].includes('noshow')).slice(0,4);cand.forEach(t=>{const ns=[...t.st].find(([s,v])=>v==='noshow')[0];feedback.push({from:null,to:ns,up:false,tag:'Didn’t turn up',date:t.date});});})();
+
+/* ----- per-member stats ----- */
+function stats(s){
+  let went=0,ns=0,ng=0,saved=0,paid=0,trips14=0; const c=circleOf(s);
+  const cut=dkey(PAST[Math.max(0,PAST.length-10)]);
+  trips.forEach(t=>{ const v=t.st.get(s); if(!v) return; if(v==='went'){went++; if(t.date>=cut) trips14++;
+      if(t.confirmedBy){ const n=[...t.st.values()].filter(x=>x==='went').length; const share=t.total>0?t.total/n:null;
+        const solo=soloFare(s,t.mode); if(share!=null){paid+=share; saved+=Math.max(0,solo-share);} } }
+    else if(v==='noshow') ns++; else if(v==='notgoing') ng++; });
+  const rel=went+ns?Math.round(went/(went+ns)*100):null;
+  const tagCount={}; feedback.filter(f=>f.to===s&&f.up).forEach(f=>tagCount[f.tag]=(tagCount[f.tag]||0)+1);
+  const badges=Object.entries(tagCount).filter(([k,v])=>v>=2&&went>=5).map(([k])=>k);
+  if(rel!==null&&rel>=95&&went>=5&&!badges.includes('Punctual')) badges.unshift('Reliable');
+  return {went,ns,ng,rel,saved,paid,trips14,badges,active:trips14>0};
+}
+function soloFare(s,mode){const km_=km(P(s),C)*ROAD;const r=MODE_RATE[mode]||MODE_RATE['Shared ride-hailing'];
+  if(r.type==='km') return km_*r.v; if(r.type==='pp') return r.v; return 0;}
+function routeFares(area,mode){const v=[];trips.forEach(t=>{ if(!(t.total>0)||t.mode!==mode) return; const c=circles.find(x=>x.id===t.cid);
+  const n=[...t.st.values()].filter(x=>x==='went').length; [...t.st.keys()].forEach(s=>{ if(s.area===area&&t.st.get(s)==='went') v.push(t.total/n);});});return v;}
+function streak(c){let n=0;for(let i=PAST.length-1;i>=0;i--){const k=dkey(PAST[i]);const t=trips.find(x=>x.cid===c.id&&x.date===k);
+  if(!t){ if(travelDays(c).includes(DOW(PAST[i]))) break; else continue;} if(t.confirmedBy) n++; else break;}return n;}
+
+/* ----- state ----- */
+let role='student', tab='today', admTab='usage', options=null, optIx=0, reports=[{id:1,from:'Taha Rizvi',about:'Kashif Noor',reason:'Repeatedly no-show',detail:'Marked going three times last week but did not turn up.',status:'Open',when:'Yesterday'}];
+let tomorrowOff=new Set(); // students who tapped "Not going tomorrow"
+function todayTrip(c){return trips.find(t=>t.cid===c.id&&t.date===dkey(TODAY));}
+function ensureToday(c){let t=todayTrip(c); if(t) return t; const pl=c.members.filter(s=>plannedOn(c,s,TODAY)); if(pl.length<2&&!pl.includes(me())) return null;
+  const st=new Map(); pl.forEach(s=>st.set(s,'planned')); t={date:dkey(TODAY),cid:c.id,st,confirmedBy:null,mode:c.mode,total:null,today:true}; trips.push(t); return t;}
+
+/* ----- money, rota, guest seat, re-match ----- */
+const wentN=t=>[...t.st.values()].filter(v=>v==='went').length;
+function circleTrips(c){return trips.filter(t=>t.cid===c.id&&t.confirmedBy);}
+function balances(c){const net=new Map(c.members.map(s=>[s,0]));
+  circleTrips(c).forEach(t=>{ if(!(t.total>0)||!t.payer||t.date<=c.settledUntil) return; const n=wentN(t); if(!n) return;
+    t.st.forEach((v,s)=>{ if(v==='went'&&net.has(s)) net.set(s,net.get(s)-t.total/n);}); if(net.has(t.payer)) net.set(t.payer,net.get(t.payer)+t.total);});
+  c.settlements.forEach(x=>{ if(net.has(x.from)) net.set(x.from,net.get(x.from)+x.amt); if(net.has(x.to)) net.set(x.to,net.get(x.to)-x.amt);});
+  return net;}
+function settleLines(c){const net=balances(c);const deb=[],cre=[];net.forEach((v,s)=>{ if(v<-5) deb.push([s,-v]); else if(v>5) cre.push([s,v]);});
+  deb.sort((a,b)=>b[1]-a[1]);cre.sort((a,b)=>b[1]-a[1]);const out=[];let i=0,j=0;
+  while(i<deb.length&&j<cre.length){const a=Math.min(deb[i][1],cre[j][1]);out.push({from:deb[i][0],to:cre[j][0],amt:Math.round(a/10)*10});deb[i][1]-=a;cre[j][1]-=a;if(deb[i][1]<5)i++;if(cre[j][1]<5)j++;}
+  return out.filter(x=>x.amt>0);}
+const ROTA_MODES=['Family driver','Parent drop','Classmate drives'];
+function rotaDates(c,n=10){const out=[];const d=new Date(TODAY);while(out.length<n){ if(![0,6].includes(d.getDay())&&travelDays(c).includes(DOW(d))) out.push(new Date(d)); d.setDate(d.getDate()+1);}return out;}
+function rotaFor(c){const el=c.members.filter(s=>s.methods.includes(c.mode));const who=el.length?el:c.members;
+  return rotaDates(c).map((d,i)=>({d,s:c.rotaOver[dkey(d)]||who[i%who.length]}));}
+const driveLabel=(c,s)=>c.mode==='Classmate drives'?(s.me?'You drive':esc(short(s.name))+' drives'):c.mode==='Family driver'?(s.me?'Your family driver':esc(short(s.name))+'’s family driver'):(s.me?'Your parent drops':esc(short(s.name))+'’s parent drops');
+let guest=null, seatOpen=false, rematch=false;
+function seatOptions(){const m=me(),mc=circleOf(m);const d=DOW(TODAY);
+  return circles.filter(c=>c!==mc&&c.members.every(s=>allowed(m,s))&&travelDays(c).includes(d)).map(c=>{
+    const going=c.members.filter(s=>plannedOn(c,s,TODAY)&&!tomorrowOff.has(s)).length - (c.id%3===0?1:0); const free=4-going;
+    const near=Math.min(...c.members.map(s=>km(P(m),P(s)))); const onw=c.members.some(s=>detour(m,s)<=0.12);
+    const ref=c.members[0]; const dt=Math.abs(mins(ref.tt[d].in)-mins(m.tt[d].in));
+    return {c,near,onw,dt,free};}).filter(x=>x.free>0&&(x.near<=8||x.onw)&&x.dt<=30).sort((a,b)=>a.near-b.near).slice(0,3);}
+
+/* ===== Navigation ===== */
+function renderNav(){
+  if(role==='student'){
+    const c=circleOf(me());
+    const T=c?[['today','Today'],['circle','My circle'],['money','Money'],['insights','My savings']]:[['find','Find my circle'],['insights','My savings']];
+    if(rematch&&c&&!T.some(x=>x[0]==='find')) T.push(['find','Re-match']);
+    if(!T.some(x=>x[0]===tab)) tab=T[0][0];
+    $('#subnav').innerHTML=`<nav class="atabs" role="tablist">${T.map(([k,l])=>`<button role="tab" aria-selected="${tab===k}" data-t="${k}">${l}</button>`).join('')}</nav>`;
+    document.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{tab=b.dataset.t;render();});
+  } else {
+    const pend=students.filter(s=>s.status==='pending').length, open=reports.filter(r=>r.status==='Open').length;
+    $('#subnav').innerHTML=`<nav class="atabs" role="tablist">${[['usage','Usage'],['fares','Fares'],['health','Circle health'],['approve','Approvals',pend],['reports','Reports',open]].map(([k,l,n])=>`<button role="tab" aria-selected="${admTab===k}" data-at="${k}">${l}${n?` <span class="badge sign">${n}</span>`:''}</button>`).join('')}</nav>`;
+    document.querySelectorAll('[data-at]').forEach(b=>b.onclick=()=>{admTab=b.dataset.at;render();});
+  }
+}
+function fillAcct(){const a=students.filter(s=>s.status==='approved');const opt=g=>a.filter(s=>s.g===g).sort((x,y)=>x.name.localeCompare(y.name)).map(s=>`<option value="${s.id}" ${s.me?'selected':''}>${esc(s.name)} · ${esc(sa(s.area))}${circleOf(s)?'':' · no circle'}</option>`).join('');
+  $('#acct').innerHTML=`<optgroup label="Female students">${opt('F')}</optgroup><optgroup label="Male students">${opt('M')}</optgroup>`;}
+function switchTo(id){students.forEach(s=>s.me=(s.id==id));options=null;guest=null;seatOpen=false;rematch=false;findStage='trip';tab=circleOf(me())?'today':'find';setRole('student',true);fillAcct();render();window.scrollTo({top:0});toast('Now testing as '+me().name);}
+function setRole(r,quiet){role=r;$('#role-student').setAttribute('aria-pressed',r==='student');$('#role-admin').setAttribute('aria-pressed',r==='admin');if(!quiet)render();}
+$('#acct').onchange=e=>switchTo(e.target.value);
+$('#role-student').onclick=()=>setRole('student'); $('#role-admin').onclick=()=>setRole('admin');
+
+/* ===== Student: Today ===== */
+function vToday(){
+  const m=me(), c=circleOf(m), info=groupInfo([m,...c.members.filter(s=>s!==m)]);
+  const t=ensureToday(c); const st=stats(m);
+  const plannedToday=t&&t.st.has(m);
+  const others=c.members.filter(s=>s!==m);
+  const shareSugg=(()=>{const v=routeFares(m.area,c.mode);const md=v.length?median(v):Math.max(50,soloFare(m,c.mode)/Math.max(2,c.members.length));const r=x=>Math.max(10,Math.round(x/10)*10);return [r(md*0.85),r(md),r(md*1.15)];})();
+  let card='';
+  if(!t||!plannedToday){ card=`<div class="hero quiet"><div><p class="eyebrow">${fmt(TODAY)}</p><h2>No circle trip planned for you today</h2><p class="hint">Your circle travels on ${travelDays(c).join(', ')}.</p></div></div>`; }
+  else if(t.confirmedBy){
+    const n=[...t.st.values()].filter(v=>v==='went').length; const mine=t.st.get(m);
+    const share=t.total>0?t.total/n:null;
+    card=`<div class="hero done"><div><p class="eyebrow">${fmt(TODAY)} · confirmed</p>
+      <h2>${t.confirmedBy===m?'You confirmed today’s trip':esc(short(t.confirmedBy.name))+' confirmed today’s trip'} for ${n} ${n>1?'people':'person'}</h2>
+      ${mine==='went'?(share!=null?`<p class="big">Your share: <b class="mono">${rs(share)}</b> · saved about <b class="mono">${rs(Math.max(0,soloFare(m,t.mode)-share))}</b> vs going alone</p>`:''):`<p class="hint">You're marked as not travelling today.</p>`}
+      </div>${t.confirmedBy!==m?`<button class="link" id="notme">${mine==='went'?'Not me? I didn’t go':'Actually, I did go'}</button>`:''}</div>
+      ${t.confirmedBy===m&&t.total==null&&mine==='went'&&MODE_RATE[t.mode].type!=='zero'?`<div class="card fare"><div class="row" style="justify-content:space-between;align-items:flex-start"><p class="q" style="margin:0">Your share today? <span class="hint">(optional)</span></p>
+        <label class="hint row" style="gap:6px;flex-wrap:nowrap">Paid by <select id="fare-payer" style="width:auto;padding:5px 8px">${c.members.filter(s=>t.st.get(s)==='went').map(s=>`<option value="${s.id}" ${s===m?'selected':''}>${s===m?'Me':esc(short(s.name))}</option>`).join('')}</select></label></div>
+        <p class="hint" style="margin:4px 0 10px">Adds to your circle’s Money tab so everyone pays their fair share.</p>
+        <div class="opts">${shareSugg.map(v=>`<button class="opt" data-fare="${v}">${rs(v)}</button>`).join('')}<button class="opt" id="fare-other">Other</button><button class="opt ghost" id="fare-skip">Skip</button></div>
+        <div class="row" id="fare-custom" hidden style="margin-top:10px;flex-wrap:nowrap"><input type="number" id="fare-amt" min="0" step="10" placeholder="Amount in Rs" aria-label="Your share in rupees"><button class="btn primary" id="fare-save">Save</button></div></div>`:''}`;
+  } else {
+    card=`<div class="hero ask"><div><p class="eyebrow">${fmt(TODAY)}</p><h2>Reached campus with your circle today?</h2><p class="hint">One tap. It counts for your whole circle.</p></div>
+      <div class="ck"><button class="btn big primary" id="yes">✓ Yes</button><button class="btn big" id="no">✗ Didn’t go</button></div>
+      <button class="link" id="sim" style="margin-top:10px">Demo: let ${esc(short(others[0].name))} confirm instead</button></div>`;
+  }
+  const tomDay=DOW(TOMORROW), tomPlan=plannedOn(c,m,TOMORROW), off=tomorrowOff.has(m);
+  let extra='';
+  if(ROTA_MODES.includes(c.mode)&&plannedToday){const r=rotaFor(c)[0]; if(r&&dkey(r.d)===dkey(TODAY)) extra+=`<div class="card row" style="justify-content:space-between"><div><p class="eyebrow">Today’s drive</p><p class="q" style="margin:2px 0 0">${driveLabel(c,r.s)}</p></div><button class="link" data-gotab="circle">See the rota</button></div>`;}
+  if(guest){const gc=circles.find(x=>x.id===guest);extra+=`<div class="hero done"><div><p class="eyebrow">One-day seat · ${fmt(TODAY)}</p><h2>You’re travelling with ${gc.members.map(s=>esc(short(s.name))).join(', ')} today</h2><p class="hint">Only for today. Your own circle is unchanged.</p></div><button class="link" id="seat-cancel">Cancel today’s seat</button></div>`;}
+  else if(plannedToday||t){const so=seatOpen?seatOptions():[];
+    extra+=`<div class="card"><div class="row" style="justify-content:space-between"><div><p class="q" style="margin:0">Circle not going today?</p><p class="hint">Find a one-day seat with another verified circle on your route.</p></div><button class="btn" id="seat-find">${seatOpen?'Hide':'Find a seat'}</button></div>
+     ${seatOpen?(so.length?so.map(x=>`<div class="who-row"><span>${x.c.members.map(s=>esc(short(s.name))).join(', ')}<br><span class="sub">${esc(sa(x.c.members[0].area))} · ${x.onw?'on your way':k1(x.near)+' km away'} · arrives ${x.c.members[0].tt[DOW(TODAY)].in} · ${x.free} seat${x.free>1?'s':''} free</span></span><button class="btn sm primary" data-seat="${x.c.id}">Request</button></div>`).join(''):'<p class="hint" style="margin-top:8px">No circle with a free seat near you today.</p>'):''}</div>`;}
+  return `<div class="cols">
+   <section class="stack">${card}${extra}
+    <div class="card"><div class="row" style="justify-content:space-between"><div><p class="eyebrow">Tomorrow · ${fmt(TOMORROW)}</p>
+      <p class="q" style="margin:2px 0 0">${tomPlan?(off?'You’re not going':`You’re going · arrive <span class="mono">${m.tt[tomDay].in}</span>`):'No circle trip planned'}</p>
+      <p class="hint">Your weekly plan is used automatically. Tap only if it changes.</p></div>
+      ${tomPlan?`<button class="btn ${off?'primary':''}" id="tom">${off?'I’m going after all':'Not going tomorrow'}</button>`:''}</div></div>
+    <div class="tiles">
+     <div class="tile"><b class="mono">${streak(c)}</b><span>day circle streak</span></div>
+     <div class="tile"><b class="mono">${st.went}</b><span>trips with your circle</span></div>
+     <div class="tile accent"><b class="mono">${rs(st.saved)}</b><span>saved vs going alone</span></div>
+     <div class="tile"><b class="mono">${st.rel===null?'—':st.rel+'%'}</b><span>you show up when you say</span></div></div>
+   </section>
+   <aside class="stack">
+    <div class="card"><h3 style="margin-bottom:8px">Today’s circle</h3>
+     ${info.order.map((s,i)=>{const v=t?t.st.get(s):null;const lab=!v?'Not planned':v==='planned'?(t.confirmedBy?'':'Planned'):v==='went'?'Travelled':v==='notgoing'?'Not going':'Didn’t turn up';
+       const cls=v==='went'?'go':v==='planned'?'wait':'no';
+       return `<div class="who-row"><span class="row" style="gap:10px;flex-wrap:nowrap"><span class="av sm">${ini(s.name)}</span><span>${s===m?'<b>You</b>':esc(short(s.name))}<br><span class="sub">pickup ${i+1} · ${esc(sa(s.area))}</span></span></span><span class="st ${cls}">${lab}</span></div>`;}).join('')}
+     <p class="hint" style="margin-top:8px">Travelling by ${esc(c.mode)} · route about ${k1(info.roadKm)} km</p></div>
+    <div class="card">${mapSVG({group:c.members,order:info.order})}</div>
+   </aside></div>`;
+}
+function bindToday(){
+  const m=me(),c=circleOf(m); const t=todayTrip(c);
+  const conf=by=>{t.st.forEach((v,s)=>{ if(v==='planned') t.st.set(s,'went');}); t.confirmedBy=by; render();};
+  const y=$('#yes'); if(y) y.onclick=()=>{conf(m);toast('Trip confirmed for your circle');};
+  const n=$('#no'); if(n) n.onclick=()=>{t.st.set(m,'notgoing');const others=[...t.st].filter(([s,v])=>s!==m&&v==='planned');
+    if(others.length){ render(); toast('Marked as not travelling today'); } else { render(); }};
+  const sim=$('#sim'); if(sim) sim.onclick=()=>{const o=c.members.find(s=>s!==m&&t.st.get(s)==='planned')||c.members.find(s=>s!==m);conf(o);toast(short(o.name)+' confirmed for the circle');};
+  const nm=$('#notme'); if(nm) nm.onclick=()=>{t.st.set(m,t.st.get(m)==='went'?'notgoing':'went');render();toast('Thanks, your record is updated');};
+  const payer=()=>{const p=$('#fare-payer');return p?students.find(s=>s.id==p.value):m;};
+  document.querySelectorAll('[data-fare]').forEach(b=>b.onclick=()=>{const n=wentN(t);t.total=+b.dataset.fare*n;t.payer=payer();render();toast('Fare saved and added to Money');});
+  const fo=$('#fare-other'); if(fo) fo.onclick=()=>{$('#fare-custom').hidden=false;$('#fare-amt').focus();};
+  const fs=$('#fare-save'); if(fs) fs.onclick=()=>{const v=parseFloat($('#fare-amt').value);if(!(v>0)){toast('Enter an amount in Rs');return;}const n=wentN(t);t.total=v*n;t.payer=payer();render();toast('Fare saved and added to Money');};
+  const sk=$('#fare-skip'); if(sk) sk.onclick=()=>{t.total=-1;render();};
+  const sf=$('#seat-find'); if(sf) sf.onclick=()=>{seatOpen=!seatOpen;render();};
+  document.querySelectorAll('[data-seat]').forEach(b=>b.onclick=()=>{b.disabled=true;b.textContent='Requested…';setTimeout(()=>{guest=+b.dataset.seat;seatOpen=false;if(t&&t.st.has(m))t.st.set(m,'notgoing');render();toast('Seat accepted for today');},1100);});
+  const sc=$('#seat-cancel'); if(sc) sc.onclick=()=>{guest=null;render();toast('Today’s seat cancelled');};
+  document.querySelectorAll('[data-gotab]').forEach(b=>b.onclick=()=>{tab=b.dataset.gotab;render();});
+  const tm=$('#tom'); if(tm) tm.onclick=()=>{tomorrowOff.has(m)?tomorrowOff.delete(m):tomorrowOff.add(m);render();toast(tomorrowOff.has(m)?'Your circle will see you’re not going tomorrow':'You’re back on for tomorrow');};
+}
+
+/* ===== Student: My circle ===== */
+function vCircle(){
+  const m=me(), c=circleOf(m), info=groupInfo([m,...c.members.filter(s=>s!==m)]);
+  const td=travelDays(c);
+  return `<h2>Your circle</h2><p class="lead">${c.members.length} members · together since ${fmt(c.since)} · travelling by ${esc(c.mode)}</p>
+  <div class="cols"><section class="stack">
+   ${info.order.map((s,i)=>{const x=stats(s);return `<div class="card member2"><div class="av">${ini(s.name)}<span class="o">${i+1}</span></div>
+     <div style="min-width:0"><div class="nm">${s===m?'You':esc(short(s.name))} <span class="sub">· ${esc(s.prog.replace(/ \(.*\)/,''))}, Y${s.year}</span></div>
+     <div class="sub">${esc(s.area)}${s!==m?' · <span class="mono">'+esc(s.phone)+'</span>':''}</div>
+     <div class="facts"><span class="badge">✓ BIC email verified</span><span class="badge ${x.rel>=90?'ok':x.rel>=75?'':'bad'}">Shows up ${x.rel===null?'—':x.rel+'%'}</span><span class="badge">${x.went} trips</span>${x.badges.map(b=>`<span class="badge sign">★ ${esc(b)}</span>`).join('')}</div>
+     ${s!==m?`<div class="row" style="margin-top:8px;gap:6px"><span class="hint">Private feedback:</span><button class="opt sm" data-up="${s.id}">👍</button><button class="opt sm" data-down="${s.id}">👎</button></div>`:''}
+     </div></div>`;}).join('')}
+  </section><aside class="stack">
+   <div class="card"><h3 style="margin-bottom:8px">Weekly plan</h3><div class="scroll"><table class="tt"><thead><tr><th></th>${DAYS.map(d=>`<th>${d}</th>`).join('')}</tr></thead><tbody>
+    ${info.order.map(s=>`<tr><td>${s===m?'<b>You</b>':esc(short(s.name))}</td>${DAYS.map(d=>`<td class="mono">${td.includes(d)&&s.tt[d].on&&Math.abs(mins(s.tt[d].in)-mins(c.members[0].tt[d].in))<=20?s.tt[d].in:'<span class="sub">—</span>'}</td>`).join('')}</tr>`).join('')}
+   </tbody></table></div><p class="hint" style="margin-top:8px">Times are campus arrival times. Change yours in your profile.</p></div>
+   <div class="card stack"><div><h3>How your circle travels</h3><p class="hint">Change it any time; everyone in the circle sees it.</p></div>
+    <select id="c-mode" aria-label="How your circle travels">${METHODS.map(x=>`<option ${x===c.mode?'selected':''}>${x}</option>`).join('')}</select>
+    ${ROTA_MODES.includes(c.mode)?`<div><p class="q" style="margin:0 0 6px">Driving rota · next 2 weeks</p>${rotaFor(c).map(r=>`<div class="who-row"><span><span class="mono sub">${fmt(r.d)}</span> · ${driveLabel(c,r.s)}</span>${r.s===m?`<button class="btn sm" data-rota-off="${dkey(r.d)}">Can’t do it</button>`:`<button class="btn sm" data-rota-me="${dkey(r.d)}">I’ll take it</button>`}</div>`).join('')}<p class="hint" style="margin-top:6px">Turns rotate fairly between members who can drive or drop.${c.mode==='Classmate drives'?' Drivers need a valid licence; the circle shares fuel only.':''}</p></div>`:''}</div>
+   <div class="card stack"><div class="row" style="justify-content:space-between"><h3>WhatsApp group</h3><span class="badge ok">Created</span></div>
+    <p style="margin:0"><b>CommuteCircle · ${esc(sa(c.members[0].area))} → BIC</b></p><p class="hint" style="margin:0">Chat there. Use the app for confirmations, money, the rota and changes.</p>
+    <div class="wa"><div class="bub in">CommuteCircle: Reached campus today? Reply <b>1</b> = Yes, <b>2</b> = Didn’t go</div><div class="bub out">1</div><div class="bub in">✓ Confirmed for your circle. Your share: ${rs(Math.max(50,soloFare(m,'Shared ride-hailing')/Math.max(2,c.members.length)))}?  Reply with an amount or <b>skip</b></div></div>
+    <p class="hint" style="margin:0">Preview of daily confirmation by WhatsApp (stretch goal).</p></div>
+   <div class="card stack"><h3>New term or new timetable?</h3><p class="hint" style="margin:0">Timetables change each term. Update yours and we’ll re-match you, keeping your current circle members as options.</p><div><button class="btn" id="c-rematch">Update timetable and re-match</button></div></div>
+   <div class="card stack" id="fbbox" hidden><h3>Private feedback</h3><p class="hint" id="fbwho"></p><div class="opts" id="fbtags"></div><button class="btn primary" id="fbsend">Send</button></div>
+   <details class="card"><summary style="cursor:pointer;font-weight:700">Report a problem or leave the circle</summary>
+    <div class="stack" style="margin-top:12px">
+     <div><label class="hint" for="r-who">Who is it about?</label><select id="r-who">${c.members.filter(s=>s!==m).map(s=>`<option value="${s.id}">${esc(short(s.name))}</option>`).join('')}</select></div>
+     <div><label class="hint" for="r-why">What happened?</label><select id="r-why"><option>Repeatedly no-show</option><option>Inappropriate behaviour</option><option>Made me feel unsafe</option><option>Other</option></select></div>
+     <div><label class="hint" for="r-det">Details (optional)</label><input type="text" id="r-det"></div>
+     <div class="row"><button class="btn danger" id="r-send">Report and leave</button><button class="btn" id="r-leave">Just leave the circle</button></div>
+     <p class="hint">Feel unsafe right now? Contact BIC campus security straight away.</p></div></details>
+  </aside></div>`;
+}
+function bindCircle(){
+  const m=me(),c=circleOf(m); let fb=null;
+  const open=(id,up)=>{const s=students.find(x=>x.id==id);fb={s,up,tag:null};$('#fbbox').hidden=false;$('#fbwho').textContent=(up?'What did ':'What went wrong with ')+short(s.name)+(up?' do well?':'? Only Student Affairs sees this.');
+    const tags=up?TAGS:['Didn’t turn up','Very late','Rude','Other'];$('#fbtags').innerHTML=tags.map(t=>`<button class="opt" data-tag="${t}">${t}</button>`).join('');
+    document.querySelectorAll('[data-tag]').forEach(b=>b.onclick=()=>{document.querySelectorAll('[data-tag]').forEach(x=>x.setAttribute('aria-pressed',x===b));fb.tag=b.dataset.tag;});};
+  document.querySelectorAll('[data-up]').forEach(b=>b.onclick=()=>open(b.dataset.up,true));
+  document.querySelectorAll('[data-down]').forEach(b=>b.onclick=()=>open(b.dataset.down,false));
+  $('#c-mode').onchange=e=>{c.mode=e.target.value;render();toast('Your circle now travels by '+c.mode);};
+  document.querySelectorAll('[data-rota-me]').forEach(b=>b.onclick=()=>{c.rotaOver[b.dataset.rotaMe]=m;render();toast('You’ve taken that day');});
+  document.querySelectorAll('[data-rota-off]').forEach(b=>b.onclick=()=>{const others=c.members.filter(s=>s!==m&&(s.methods.includes(c.mode)||!c.members.some(x=>x!==m&&x.methods.includes(c.mode))));c.rotaOver[b.dataset.rotaOff]=others[0]||m;render();toast('Swapped. '+(others[0]?short(others[0].name):'Someone')+' has been asked to cover');});
+  $('#c-rematch').onclick=()=>{rematch=true;findStage='trip';tab='find';render();window.scrollTo({top:0});};
+  $('#fbsend').onclick=()=>{ if(!fb||!fb.tag){toast('Pick one option');return;} feedback.push({from:m,to:fb.s,up:fb.up,tag:fb.tag}); $('#fbbox').hidden=true; toast(fb.up?'Thanks! Positive feedback adds up to badges.':'Sent privately to Student Affairs.'); };
+  const leave=t=>{c.members=c.members.filter(s=>s!==m); if(c.members.length<2) circles=circles.filter(x=>x!==c); options=null; tab='find'; fillAcct(); render(); toast(t);};
+  $('#r-send').onclick=()=>{const s=students.find(x=>x.id==$('#r-who').value);reports.unshift({id:Date.now(),from:m.name,about:s.name,reason:$('#r-why').value,detail:$('#r-det').value||'No details given.',status:'Open',when:'Just now'});leave('Report sent to Student Affairs. You have left the circle.');};
+  $('#r-leave').onclick=()=>leave('You left the circle. Your number is hidden again.');
+}
+
+/* ===== Student: Find (setup + matching) ===== */
+let findStage='trip';
+function vFind(){
+  const m=me();
+  if(findStage==='match') return vMatch();
+  const on=DAYS.filter(d=>m.tt[d].on); const f=m.tt[on[0]||'Mon'];
+  return `<h2>${rematch?'Update your timetable to re-match':`Hi ${esc(m.name.split(' ')[0])}, let’s find your circle`}</h2>
+  <p class="lead">Three quick questions. We match you with classmates who live near you, or on your way, and come to campus at the same times.</p>
+  <div class="cols"><section class="card stack">
+   <div><p class="q">1. Where do you travel from?</p><select id="t-area" aria-label="Home area">${Object.keys(AREAS).sort().map(a=>`<option ${a===m.area?'selected':''}>${a}</option>`).join('')}</select><p class="hint" style="margin-top:6px">Area only. We never ask for your address.</p></div>
+   <div><p class="q">2. When are you on campus?</p>
+    <div class="opts" id="t-days">${DAYS.map(d=>`<button type="button" class="opt day" aria-pressed="${m.tt[d].on}" data-d="${d}">${d}</button>`).join('')}</div>
+    <div class="row" style="margin-top:10px;flex-wrap:nowrap"><div style="flex:1"><label class="hint" for="t-in">Usually arrive</label><input type="time" id="t-in" value="${f.in}"></div><div style="flex:1"><label class="hint" for="t-out">Usually leave</label><input type="time" id="t-out" value="${f.out}"></div></div></div>
+   <div><p class="q">3. Preferences</p>
+    ${m.g==='F'?`<label class="switch"><input type="checkbox" id="t-wo" ${m.womenOnly?'checked':''}><span><b>Women-only circle</b><br><span class="hint">Only women will be suggested, and you'll only be shown to women.</span></span></label>`:`<p class="hint">Some female students choose women-only circles. They won't be suggested to you.</p>`}
+    <p class="hint" style="margin:12px 0 6px">How would you travel together?</p>
+    <div class="opts" id="t-meth">${METHODS.map(x=>`<button type="button" class="opt" aria-pressed="${m.methods.includes(x)}" data-m="${x}">${x}</button>`).join('')}</div>
+    <p class="hint" style="margin-top:8px"><b>Shared ride-hailing:</b> Careem, Uber or inDrive, fare split. <b>Classmate drives:</b> a circle member drives their own car and the circle shares fuel. <b>Family driver / Parent drop:</b> one family drops the circle, often taking turns.</p></div>
+   <button class="btn primary big" id="t-go">Find my circle</button>
+  </section><aside class="stack">
+   <div class="card">${mapSVG({group:[m],order:[m]})}</div>
+   <div class="card"><h3 style="margin-bottom:4px">Try a test account</h3><p class="hint" style="margin-bottom:10px">Switch to another dummy student.</p>
+    <div class="stack" style="gap:8px">${SCEN.map(([id,l])=>{const s=students.find(x=>x.id===id);return `<button class="opt" style="text-align:left" data-scen="${id}" aria-pressed="${!!s.me}"><b>${esc(s.name)}</b><br><span class="hint">${esc(l)}</span></button>`}).join('')}</div></div>
+   <div class="notice"><span aria-hidden="true">ℹ</span><span>BIC doesn't arrange transport. CommuteCircle only introduces classmates; you and your families decide how to travel.</span></div>
+  </aside></div>`;
+}
+function bindFind(){
+  if(findStage==='match') return bindMatch();
+  const tog=sel=>document.querySelectorAll(sel).forEach(b=>b.onclick=()=>b.setAttribute('aria-pressed',b.getAttribute('aria-pressed')!=='true'));
+  tog('#t-days .opt'); tog('#t-meth .opt');
+  document.querySelectorAll('[data-scen]').forEach(b=>b.onclick=()=>{ if(!students.find(s=>s.id==b.dataset.scen).me) switchTo(b.dataset.scen);});
+  $('#t-go').onclick=()=>{const m=me();m.area=$('#t-area').value;m.womenOnly=m.g==='F'&&!!($('#t-wo')&&$('#t-wo').checked);
+    m.methods=[...document.querySelectorAll('#t-meth .opt[aria-pressed="true"]')].map(b=>b.dataset.m);
+    const days=[...document.querySelectorAll('#t-days .opt[aria-pressed="true"]')].map(b=>b.dataset.d); if(!days.length){toast('Pick at least one day');return;}
+    DAYS.forEach(d=>m.tt[d]={on:days.includes(d),in:$('#t-in').value,out:$('#t-out').value});
+    const mc=circleOf(m);const res=[];const avail=students.filter(s=>s.status==='approved'&&(s===m||!circleOf(s)||(rematch&&circleOf(s)===mc)));const base=buildFor(m,avail,null,rematch);if(base)res.push(base);
+    avail.filter(c=>c!==m).map(c=>({c,p:pair(m,c)})).filter(x=>x.p&&x.p.total>=MIN).sort((a,b)=>b.p.total-a.p.total).slice(0,6).forEach(x=>{const g=buildFor(m,avail,x.c,rematch);if(g&&!res.some(r=>r.length===g.length&&r.every(s=>g.includes(s))))res.push(g);});
+    const sc=g=>groupInfo(g).fit+6*g.length; res.sort((a,b)=>sc(b)-sc(a)); options=res.slice(0,3); optIx=0; findStage='match'; render(); window.scrollTo({top:0});};
+}
+function vMatch(){
+  const m=me();
+  if(!options.length) return `<h2>No circle yet</h2><p class="lead">Nobody near you or on your way travels at similar times yet. You're on the waiting list, and Student Affairs can see the demand in your area.</p>
+   <div class="card stack"><p style="margin:0">Things you can try:</p><ul style="margin:0">${m.womenOnly?'<li>Turn off women-only</li>':''}<li>Check your arrival time</li><li>Add more campus days</li></ul><div><button class="btn primary" id="m-back">Change my answers</button></div></div>`;
+  const g=options[optIx], info=groupInfo(g);
+  return `<h2>We found ${options.length>1?options.length+' possible circles':'a circle'} for you</h2>
+  <p class="lead">Everyone lives near you or along your route, and arrives within about 15 minutes of you. Phone numbers are shared only when everyone accepts.</p>
+  ${options.length>1?`<div class="opts" style="margin-bottom:14px">${options.map((o,i)=>`<button class="opt" aria-pressed="${i===optIx}" data-opt="${i}">Option ${i+1} · ${groupInfo(o).fit}</button>`).join('')}</div>`:''}
+  <div class="cols"><section class="card stack">
+   <div class="fit"><b class="mono">${info.fit}</b><div><div class="q" style="margin:0">${fitLabel(info.fit)}</div><div class="sub">Circle of ${g.length} · together on ${info.days.join(', ')||'—'}</div></div></div>
+   <div>${info.order.map((s,i)=>{const p=s===m?null:pair(m,s);return `<div class="member"><div class="av">${ini(s.name)}<span class="o">${i+1}</span></div><div style="min-width:0">
+     <div class="nm">${s===m?'You':esc(short(s.name))} <span class="sub">· ${esc(s.prog.replace(/ \(.*\)/,''))}</span></div><div class="sub">${esc(s.area)}</div>
+     ${p?`<div class="facts">${p.d<0.3?'<span class="badge ok">Same area</span>':`<span class="badge">${k1(p.d)} km away</span>`}${p.onWay&&p.d>=0.3?'<span class="badge ok">On your way</span>':''}<span class="badge">${p.goodDays.length} days match</span></div>`:''}</div><div></div></div>`;}).join('')}</div>
+   <div class="row"><button class="btn primary big" id="m-accept">Accept this circle</button><button class="btn" id="m-back">Change my answers</button></div>
+  </section><aside class="stack"><div class="card">${mapSVG({group:g,order:info.order,others:pool().filter(s=>!g.includes(s)&&allowed(m,s))})}</div>
+   <div class="tiles"><div class="tile"><b class="mono">${rs(soloFare(m,'Shared ride-hailing'))}</b><span>a trip alone (ride-hailing, est.)</span></div><div class="tile accent"><b class="mono">${rs(info.roadKm*MODE_RATE['Shared ride-hailing'].v/g.length)}</b><span>your share in this circle (est.)</span></div></div></aside></div>`;
+}
+function bindMatch(){
+  document.querySelectorAll('[data-opt]').forEach(b=>b.onclick=()=>{optIx=+b.dataset.opt;render();});
+  const bk=$('#m-back'); if(bk) bk.onclick=()=>{findStage='trip';render();};
+  const ac=$('#m-accept'); if(ac) ac.onclick=()=>{const g=options[optIx];const common=METHODS.filter(x=>g.every(s=>s.methods.includes(x)));
+    if(rematch){const old=circleOf(me());if(old){g.forEach(s=>{const oc=circleOf(s);if(oc){oc.members=oc.members.filter(x=>x!==s);}});circles=circles.filter(x=>x.members.length>=2);}}
+    circles.push({id:Date.now(),members:g,mode:common[0]||me().methods[0]||'Shared ride-hailing',since:TODAY,settledUntil:'',settlements:[],rotaOver:{},weekly:true}); rematch=false; findStage='trip'; options=null; tab='today'; fillAcct(); render(); toast('Everyone accepted. Your circle is ready!');};
+}
+
+/* ===== Student: Money ===== */
+function vMoney(){
+  const m=me(),c=circleOf(m),net=balances(c),mine=net.get(m)||0,lines=settleLines(c).filter(x=>x.from===m||x.to===m);
+  const recent=circleTrips(c).filter(t=>t.total>0&&t.payer&&t.date>c.settledUntil).sort((a,b)=>b.date.localeCompare(a.date));
+  return `<h2>Money</h2><p class="lead">Who paid and who owes, from the fares your circle entered. CommuteCircle doesn’t handle money: pay each other in cash or by bank transfer, then mark it settled.</p>
+  <div class="cols"><section class="stack">
+   <div class="hero ${Math.abs(mine)<5?'quiet':mine>0?'done':'ask'}"><div><p class="eyebrow">Your balance</p><h2>${Math.abs(mine)<5?'You’re all settled':mine>0?`You’re owed <span class="mono">${rs(mine)}</span>`:`You owe <span class="mono">${rs(-mine)}</span>`}</h2>
+    <p class="hint">Since the last settle-up${c.settledUntil?` on ${fmt(new Date(c.settledUntil+'T12:00:00'))}`:''}.</p></div></div>
+   <div class="card">${lines.length?lines.map(x=>`<div class="who-row"><span>${x.to===m?`<b>${esc(short(x.from.name))}</b> owes you`:`You owe <b>${esc(short(x.to.name))}</b>`} <span class="mono">${rs(x.amt)}</span></span><button class="btn sm ${x.from===m?'primary':''}" data-settle="${x.from.id}-${x.to.id}-${x.amt}">${x.from===m?'I’ve paid':'Mark as received'}</button></div>`).join(''):'<p class="hint" style="margin:0">Nothing to settle with anyone right now.</p>'}</div>
+   <div class="card"><h3 style="margin-bottom:6px">Circle balances</h3>${c.members.map(s=>{const v=net.get(s)||0;return `<div class="who-row"><span>${s===m?'<b>You</b>':esc(short(s.name))}</span><span class="mono" style="color:${v>5?'var(--good)':v<-5?'var(--bad)':'var(--muted)'};font-weight:600">${Math.abs(v)<5?'settled':(v>0?'+':'−')+rs(Math.abs(v))}</span></div>`;}).join('')}</div>
+  </section><section class="card"><h3 style="margin-bottom:6px">Trips since last settle-up</h3>
+   ${recent.length?`<div class="scroll"><table class="tt"><thead><tr><th>Day</th><th>Paid by</th><th style="text-align:right">Total</th><th style="text-align:right">Your share</th></tr></thead><tbody>${recent.map(t=>{const d=new Date(t.date+'T12:00:00');const mineW=t.st.get(m)==='went';return `<tr><td class="mono sub">${fmt(d)}</td><td>${t.payer===m?'You':esc(short(t.payer.name))}</td><td class="mono" style="text-align:right">${rs(t.total)}</td><td class="mono" style="text-align:right">${mineW?rs(t.total/wentN(t)):'<span class="sub">didn’t go</span>'}</td></tr>`;}).join('')}</tbody></table></div>`:'<p class="hint">No fares entered since the last settle-up.</p>'}
+   <div class="row" style="margin-top:12px"><button class="btn" id="settle-all">Everyone settled up</button></div></section></div>`;
+}
+function bindMoney(){
+  const m=me(),c=circleOf(m);
+  document.querySelectorAll('[data-settle]').forEach(b=>b.onclick=()=>{const [f,t,a]=b.dataset.settle.split('-');c.settlements.push({from:students.find(s=>s.id==f),to:students.find(s=>s.id==t),amt:+a});render();toast('Marked as settled');});
+  $('#settle-all').onclick=()=>{c.settledUntil=dkey(TODAY);c.settlements=[];render();toast('Balances reset for everyone');};
+}
+
+/* ===== Student: Savings ===== */
+function vInsights(){
+  const m=me(), c=circleOf(m), x=stats(m);
+  const weeks=[];for(let i=0;i<4;i++){const ws=PAST.slice(i*5,i*5+5).map(dkey);let paid=0,solo=0;
+    trips.forEach(t=>{ if(!ws.includes(t.date)||t.st.get(m)!=='went'||t.total==null||t.total<0||!t.confirmedBy) return; const n=[...t.st.values()].filter(v=>v==='went').length; paid+=t.total/n; solo+=soloFare(m,t.mode);});
+    weeks.push({l:'Week '+(i+1),paid,solo});}
+  const mx=Math.max(1,...weeks.map(w=>w.solo));
+  const guide=METHODS.filter(md=>MODE_RATE[md].type!=='zero').map(md=>{const v=routeFares(m.area,md);return {md,n:v.length,med:median(v),lo:v.length?Math.min(...v):0,hi:v.length?Math.max(...v):0};});
+  return `<h2>My savings</h2><p class="lead">Based on the trips your circle confirmed and the fares members entered. Estimates only.</p>
+  <div class="tiles" style="margin-bottom:16px"><div class="tile accent"><b class="mono">${rs(x.saved)}</b><span>saved vs going alone</span></div><div class="tile"><b class="mono">${rs(x.paid)}</b><span>your fare shares</span></div><div class="tile"><b class="mono">${x.went}</b><span>shared trips</span></div><div class="tile"><b class="mono">${x.rel===null?'—':x.rel+'%'}</b><span>show-up rate</span></div></div>
+  <div class="cols"><section class="card"><h3 style="margin-bottom:12px">Last 4 weeks: alone vs your share</h3>
+   ${c?weeks.map(w=>`<div class="wk"><span class="sub">${w.l}</span><div class="bars"><div class="sbar solo" style="width:${w.solo/mx*100}%"><span>${w.solo?rs(w.solo):''}</span></div><div class="sbar paid" style="width:${w.paid/mx*100}%"><span>${w.paid?rs(w.paid):''}</span></div></div></div>`).join('')+`<div class="legend"><span><i style="background:var(--road)"></i>If you went alone</span><span><i style="background:var(--accent)"></i>What you paid</span></div>`:'<p class="hint">Join a circle to start saving.</p>'}
+  </section><section class="card"><h3 style="margin-bottom:4px">Fare guide: ${esc(sa(m.area))} → campus</h3><p class="hint" style="margin-bottom:10px">Per person, from fares other members entered.</p>
+   <table class="tt"><thead><tr><th>Way</th><th style="text-align:right">Usual share</th><th style="text-align:right">Range</th><th style="text-align:right">Trips</th></tr></thead><tbody>
+   ${guide.map(g=>`<tr><td>${g.md}</td><td class="mono" style="text-align:right">${g.n?rs(g.med):'—'}</td><td class="mono sub" style="text-align:right">${g.n?rs(g.lo)+'–'+rs(g.hi).replace('Rs ',''):'not enough data'}</td><td class="mono" style="text-align:right">${g.n}</td></tr>`).join('')}</tbody></table></section></div>`;
+}
+
+/* ===== Admin ===== */
+function adminData(){
+  const act=students.filter(s=>s.status==='approved');
+  const inCircle=act.filter(s=>circleOf(s)); const active=act.filter(s=>stats(s).active);
+  let planned=0,done=0; trips.forEach(t=>{ if(t.today&&!t.confirmedBy) return; t.st.forEach(v=>{planned++; if(v==='went'&&t.confirmedBy) done++;});});
+  const perDay=PAST.concat([TODAY]).map(d=>({d,n:trips.filter(t=>t.date===dkey(d)&&t.confirmedBy).length}));
+  return {act,inCircle,active,planned,done,perDay};
+}
+function vUsage(){
+  const D=adminData(); const mx=Math.max(1,...D.perDay.map(x=>x.n));
+  const areas=Object.keys(AREAS).map(a=>{const ss=D.act.filter(s=>s.area===a);return {a,n:ss.length,ic:ss.filter(s=>circleOf(s)).length,ac:ss.filter(s=>stats(s).active).length};}).filter(r=>r.n).sort((x,y)=>(y.n-y.ic)-(x.n-x.ic)||y.n-x.n);
+  return `<h2>Usage</h2><p class="lead">How many students CommuteCircle is helping, and where the gaps are. Totals only: individual records are opened only when handling a report.</p>
+  <div class="kpis"><div class="kpi"><b class="mono">${D.act.length}</b><span>Approved members</span></div><div class="kpi"><b class="mono">${D.inCircle.length}</b><span>In a circle (gap covered)</span></div>
+   <div class="kpi"><b class="mono">${D.active.length}</b><span>Active (trip in last 2 weeks)</span></div><div class="kpi"><b class="mono">${D.planned?Math.round(D.done/D.planned*100):0}%</b><span>Planned trips completed</span></div>
+   <div class="kpi"><b class="mono">${circles.filter(c=>c.weekly!==false).length}/${circles.length}</b><span>Circles still travelling (weekly check)</span></div><div class="kpi"><b class="mono" style="color:var(--bad)">${D.act.length-D.inCircle.length}</b><span>Still without a circle</span></div></div>
+  <div class="cols"><section class="card"><h3 style="margin-bottom:10px">Confirmed circle trips per day</h3>
+   <div class="daybars">${D.perDay.map(x=>`<div class="db" title="${fmt(x.d)}: ${x.n}"><span class="v mono">${x.n||''}</span><i style="height:${x.n/mx*100}%"></i><span class="l">${x.d.getDate()}</span></div>`).join('')}</div>
+   <p class="hint" style="margin-top:8px">Last 4 weeks of weekdays, ending today (${fmt(TODAY)}).</p></section>
+  <section class="card">${mapSVG({bubbles:areas.map(r=>({a:r.a,n:r.n,u:r.n-r.ic}))})}<div class="legend"><span><i style="background:var(--accent);opacity:.5"></i>Members</span><span><i style="background:var(--bad)"></i>Without a circle</span></div></section></div>
+  <section class="card" style="margin-top:18px"><div class="scroll"><table class="tt"><thead><tr><th>Area</th><th style="text-align:right">Members</th><th style="text-align:right">In a circle</th><th style="text-align:right">Active</th><th style="text-align:right">Without circle</th></tr></thead><tbody>
+   ${areas.map(r=>`<tr><td>${esc(r.a)}</td><td class="mono" style="text-align:right">${r.n}</td><td class="mono" style="text-align:right">${r.ic}</td><td class="mono" style="text-align:right">${r.ac}</td><td class="mono" style="text-align:right;${r.n-r.ic?'color:var(--bad);font-weight:700':''}">${r.n-r.ic}</td></tr>`).join('')}</tbody></table></div></section>`;
+}
+function vFares(){
+  const rows=[];Object.keys(AREAS).forEach(a=>METHODS.filter(m=>MODE_RATE[m].type!=='zero').forEach(md=>{const v=routeFares(a,md);if(v.length>=3)rows.push({a,md,n:v.length,med:median(v),km:km(AREAS[a],C)*ROAD});}));
+  rows.sort((x,y)=>y.med-x.med);
+  const byMode=METHODS.filter(m=>MODE_RATE[m].type!=='zero').map(md=>{const v=[];rows.filter(r=>r.md===md).forEach(r=>v.push(r.med/r.km));return {md,perKm:median(v),n:rows.filter(r=>r.md===md).reduce((t,r)=>t+r.n,0)};});
+  const entered=trips.filter(t=>t.total!=null&&t.total>0).length, conf=trips.filter(t=>t.confirmedBy).length;
+  return `<h2>Fares</h2><p class="lead">What students actually pay, from optional fare entries after confirmed trips. Medians, so one unusual entry doesn't skew the picture.</p>
+  <div class="kpis">${byMode.map(b=>`<div class="kpi"><b class="mono">${b.n?rs(b.perKm)+'/km':'—'}</b><span>${b.md} · per person</span></div>`).join('')}<div class="kpi"><b class="mono">${conf?Math.round(entered/conf*100):0}%</b><span>of confirmed trips have a fare</span></div></div>
+  <section class="card"><div class="scroll"><table class="tt"><thead><tr><th>Area → campus</th><th>Way</th><th style="text-align:right">Road km (est.)</th><th style="text-align:right">Median share</th><th style="text-align:right">Entries</th></tr></thead><tbody>
+  ${rows.map(r=>`<tr><td>${esc(r.a)}</td><td>${r.md}</td><td class="mono" style="text-align:right">${k1(r.km)}</td><td class="mono" style="text-align:right">${rs(r.med)}</td><td class="mono" style="text-align:right">${r.n}</td></tr>`).join('')}</tbody></table></div>
+  <p class="hint" style="margin-top:8px">Areas with fewer than 3 entries for a way of travelling are hidden.</p></section>`;
+}
+function vHealth(){
+  const rows=circles.map(c=>{let pl=0,dn=0,ns=0;trips.filter(t=>t.cid===c.id&&!(t.today&&!t.confirmedBy)).forEach(t=>t.st.forEach(v=>{pl++;if(v==='went'&&t.confirmedBy)dn++;if(v==='noshow')ns++;}));
+    const neg=feedback.filter(f=>!f.up&&c.members.includes(f.to)).length; return {c,rate:pl?Math.round(dn/pl*100):0,ns,neg,streak:streak(c)};}).sort((a,b)=>a.rate-b.rate);
+  return `<h2>Circle health</h2><p class="lead">Circles with low completion, no-shows or private negative feedback, so Student Affairs can help early.</p>
+  <section class="card"><div class="scroll"><table class="tt"><thead><tr><th>Circle</th><th>Area(s)</th><th style="text-align:right">Completed</th><th style="text-align:right">No-shows</th><th style="text-align:right">Negative feedback</th><th style="text-align:right">Streak</th><th></th></tr></thead><tbody>
+  ${rows.map(r=>`<tr><td>${r.c.members.map(s=>esc(short(s.name))).join(', ')}</td><td class="sub">${[...new Set(r.c.members.map(s=>sa(s.area)))].join(', ')}</td><td class="mono" style="text-align:right">${r.rate}%</td><td class="mono" style="text-align:right">${r.ns}</td><td class="mono" style="text-align:right">${r.neg}</td><td class="mono" style="text-align:right">${r.streak}</td>
+   <td>${r.rate<75||r.ns>=3||r.neg>=2?'<span class="badge bad">Check in</span>':'<span class="badge ok">Healthy</span>'}</td></tr>`).join('')}</tbody></table></div></section>`;
+}
+function vApprove(){
+  const p=students.filter(s=>s.status==='pending');
+  return `<h2>Approvals</h2><p class="lead">Check each sign-up against the student record. Members accept the Terms, Privacy Notice and Code of Conduct at sign-up; acceptance is logged.</p>
+  <section class="card">${p.length?`<div class="scroll"><table class="tt"><thead><tr><th>Name</th><th>Programme</th><th>Area</th><th>Terms accepted</th><th></th></tr></thead><tbody>
+   ${p.map(s=>`<tr><td><b>${esc(s.name)}</b><br><span class="sub mono">${esc(s.name.toLowerCase().replace(' ','.'))}@bic.edu.pk</span></td><td>${esc(s.prog)} · Y${s.year}</td><td>${esc(s.area)}</td><td class="sub">v1.0 · ${fmt(PAST.at(-2))}</td><td><div class="row" style="flex-wrap:nowrap"><button class="btn sm primary" data-ap="${s.id}">Approve</button><button class="btn sm" data-rj="${s.id}">Reject</button></div></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No sign-ups waiting.</div>'}</section>`;
+}
+function bindApprove(){
+  document.querySelectorAll('[data-ap]').forEach(b=>b.onclick=()=>{students.find(s=>s.id==b.dataset.ap).status='approved';fillAcct();render();toast('Member approved');});
+  document.querySelectorAll('[data-rj]').forEach(b=>b.onclick=()=>{students.find(s=>s.id==b.dataset.rj).status='rejected';render();toast('Sign-up rejected');});
+}
+function vReports(){
+  const neg=feedback.filter(f=>!f.up);
+  return `<h2>Reports</h2><p class="lead">Reports need a decision. Private negative feedback is shown below for context; it is never visible to other students.</p>
+  <div class="stack">${reports.length?reports.map(r=>`<section class="card"><div class="row" style="justify-content:space-between"><h3>${esc(r.reason)}</h3><span class="badge ${r.status==='Open'?'bad':'ok'}">${r.status}</span></div>
+   <p style="margin:8px 0">${esc(r.detail)}</p><p class="hint" style="margin-bottom:12px">From ${esc(r.from)} · About ${esc(r.about)} · ${r.when}</p>
+   ${r.status==='Open'?`<div class="row"><button class="btn sm primary" data-res="${r.id}">Mark resolved</button><button class="btn sm danger" data-sus="${r.id}">Suspend member</button></div>`:''}</section>`).join(''):'<div class="card empty">No reports.</div>'}
+  <section class="card"><h3 style="margin-bottom:8px">Private negative feedback (${neg.length})</h3><div class="scroll"><table class="tt"><thead><tr><th>About</th><th>Reason</th><th>From</th></tr></thead><tbody>${neg.map(f=>`<tr><td>${esc(f.to.name)}</td><td>${esc(f.tag)}</td><td class="sub">${f.from?esc(f.from.name):'Circle member'}</td></tr>`).join('')}</tbody></table></div></section></div>`;
+}
+function bindReports(){
+  document.querySelectorAll('[data-res]').forEach(b=>b.onclick=()=>{reports.find(r=>r.id==b.dataset.res).status='Resolved';render();toast('Report resolved');});
+  document.querySelectorAll('[data-sus]').forEach(b=>b.onclick=()=>{const r=reports.find(r=>r.id==b.dataset.sus);r.status='Member suspended';const s=students.find(x=>x.name===r.about);if(s)s.status='suspended';render();toast('Member suspended');});
+}
+
+/* ===== Render ===== */
+function render(){
+  renderNav(); let v;
+  if(role==='student') v={today:[vToday,bindToday],circle:[vCircle,bindCircle],money:[vMoney,bindMoney],find:[vFind,bindFind],insights:[vInsights,()=>{}]}[tab];
+  else v={usage:[vUsage,()=>{}],fares:[vFares,()=>{}],health:[vHealth,()=>{}],approve:[vApprove,bindApprove],reports:[vReports,bindReports]}[admTab];
+  $('#view').innerHTML=v[0](); v[1]();
+}
+fillAcct(); render();
+
+</script>
+</html>
