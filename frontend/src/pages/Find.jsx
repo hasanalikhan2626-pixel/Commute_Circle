@@ -47,7 +47,7 @@ function Search() {
     setBusy(true)
     try {
       const ex = perDay ? Object.fromEntries(Object.entries(t.exceptions).filter(([d]) => t.days.includes(d))) : {}
-      await api('/api/trip', { method: 'PUT', body: { area: t.area, days: t.days, arrive: t.arrive, leave: t.leave, women_only: t.women_only, methods: t.methods, has_car: t.has_car, seats: Number(t.seats) || 0, exceptions: ex } })
+      await api('/api/trip', { method: 'PUT', body: { area: t.area, days: t.days, arrive: t.arrive, leave: t.leave, women_only: t.women_only, methods: t.methods, has_car: t.has_car, seats: Number(t.seats) || 0, has_bike: !!t.has_bike, exceptions: ex } })
       if (user.status !== 'approved') { toast('Saved. You can search once Student Affairs approves your sign-up.'); return }
       setRes(await api('/api/find/options')); setIx(0); setStage('match'); window.scrollTo({ top: 0 })
     } catch (e) { setErr(e.message) } finally { setBusy(false) }
@@ -103,7 +103,10 @@ function Search() {
                 {t.has_car && <label className="hint row" style={{ gap: 6 }}>Seats for classmates <input type="number" min="1" max="6" value={t.seats} onChange={(e) => setT({ ...t, seats: e.target.value })} style={{ width: 80 }} /></label>}
               </div>
             )}
-            <p className="hint" style={{ marginTop: 8 }}><b>Shared ride-hailing:</b> Careem, Uber or inDrive, fare split. <b>Classmate drives:</b> a circle member drives their own car and the circle shares fuel. <b>Family driver / Parent drop:</b> one family drops the circle, often taking turns.</p></div>
+            {t.methods.includes('Motorbike pillion') && (
+              <label className="switch" style={{ marginTop: 10 }}><input type="checkbox" checked={!!t.has_bike} onChange={(e) => setT({ ...t, has_bike: e.target.checked })} /><span>I ride a motorbike and can take one pillion passenger</span></label>
+            )}
+            <p className="hint" style={{ marginTop: 8 }}><b>Shared ride-hailing:</b> Careem, Uber or inDrive, fare split. <b>Classmate drives:</b> a circle member drives their own car and the circle shares fuel. <b>Family driver / Parent drop:</b> one family drops the circle, often taking turns; passengers chip in Rs 20/km for fuel. <b>Rickshaw:</b> up to 3 passengers, fare split. <b>Motorbike pillion:</b> one passenger pays the rider Rs 15/km.</p></div>
           <Err>{err}</Err>
           <div className="row">
             <button className="btn primary big" onClick={go} disabled={busy || !t.area}>{busy ? 'Searching…' : user.status === 'approved' ? 'Find my circle' : 'Save my answers'}</button>
@@ -151,13 +154,14 @@ function Options({ res, ix, setIx, accept, back, err, busy, womenOnly }) {
               </div><div />
             </div>
           ))}</div>
+          <Explain g={g} />
           <Err>{err}</Err>
           <div className="row"><button className="btn primary big" onClick={accept} disabled={busy}>Accept this circle</button><button className="btn" onClick={back}>Change my answers</button></div>
         </section>
         <aside className="stack">
           <div className="card"><Map group={g.members} others={res.others} /></div>
           <div className="tiles">
-            <div className="tile"><b className="mono">{rs(g.solo_fare)}</b><span>a trip alone (ride-hailing, est.)</span></div>
+            <div className="tile"><b className="mono">{rs(g.solo_fare)}</b><span>a trip alone ({g.mode.toLowerCase()}, est.)</span></div>
             <div className="tile accent"><b className="mono">{rs(g.share_est)}</b><span>your share in this circle (est.)</span></div>
           </div>
         </aside>
@@ -197,5 +201,24 @@ function Proposed({ c }) {
         <aside className="card"><Map group={c.members} /></aside>
       </div>
     </>
+  )
+}
+
+// Explainable match card (proposal 14.9): why each classmate fits, the detour, and the cost working.
+function Explain({ g }) {
+  const parts = [['route', 'Route', 40], ['near', 'Nearby', 20], ['sched', 'Timetable', 30], ['pref', 'Travel', 10]]
+  return (
+    <details className="why">
+      <summary>Why this circle, and how is the cost worked out?</summary>
+      <div className="scroll"><table className="bk"><thead><tr><th>Classmate</th>{parts.map(([k, l, max]) => <th key={k} style={{ whiteSpace: 'nowrap' }}>{l} /{max}</th>)}<th>Detour</th></tr></thead>
+        <tbody>{g.members.map((m) => (
+          <tr key={m.user_id}><td>{m.name}</td>
+            {parts.map(([k, , max]) => <td key={k}>{m.fit_parts ? <span className="row" style={{ gap: 6, flexWrap: 'nowrap' }}><span className="mbar" style={{ width: 44 }}><i style={{ width: `${(m.fit_parts[k] / max) * 100}%` }} /></span><span className="mono">{m.fit_parts[k]}</span></span> : <span className="sub">you</span>}</td>)}
+            <td className="mono">{m.detour_min ? `+${m.detour_min} min` : '—'}</td></tr>
+        ))}</tbody></table></div>
+      <p className="hint" style={{ margin: '8px 0 4px' }}>Fit with you out of 100. Detour = extra minutes compared with going straight to campus (road distances from OpenStreetMap, peak traffic). No one's detour is over 12 minutes.</p>
+      {g.costs.map((c) => <p key={c.mode} style={{ margin: '6px 0' }}><b>{c.mode}:</b> {c.text}</p>)}
+      <p className="hint" style={{ margin: 0 }}>Pickup is at your area's centre point; we never use your address.</p>
+    </details>
   )
 }

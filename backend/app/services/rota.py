@@ -23,6 +23,8 @@ def eligible(c: Circle) -> list[int]:
     live = [m for m in c.members if m.status in (MemberStatus.accepted, MemberStatus.pending) and m.user.profile]
     if c.mode == "Classmate drives":
         ids = [m.user_id for m in live if m.user.profile.has_car]
+    elif c.mode == "Motorbike pillion":
+        ids = [m.user_id for m in live if m.user.profile.has_bike]
     else:
         ids = [m.user_id for m in live if c.mode in (m.user.profile.methods or [])]
     return ids or [m.user_id for m in live]

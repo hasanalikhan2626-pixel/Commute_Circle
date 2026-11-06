@@ -42,6 +42,7 @@ export default function MyCircle() {
                 <div className="nm">{s.name} <span className="sub">· {s.programme}, Y{s.year}</span></div>
                 <div className="sub">{s.area}{s.phone && <> · <a className="mono" href={`tel:${s.phone}`}>{phone(s.phone)}</a></>}</div>
                 <div className="facts"><span className="badge">✓ BIC email verified</span>
+                  {c.detours?.[s.user_id] > 0 && <span className="badge">+{c.detours[s.user_id]} min detour</span>}
                   <span className={`badge ${s.reliability >= 90 ? 'ok' : s.reliability >= 75 || s.reliability == null ? '' : 'bad'}`}>Shows up {s.reliability == null ? '—' : s.reliability + '%'}</span>
                   <span className="badge">{s.trips} trips</span>{s.badges.map((b) => <span key={b} className="badge sign">★ {b}</span>)}</div>
                 {!s.me && <div className="row" style={{ marginTop: 8, gap: 6 }}><span className="hint">Private feedback:</span>
@@ -60,6 +61,7 @@ export default function MyCircle() {
             <select aria-label="How your circle travels" value={c.mode} onChange={(e) => call(() => api('/api/circle/mode', { method: 'PATCH', body: { mode: e.target.value } }), 'Your circle now travels by ' + e.target.value)}>
               {meta?.methods.map((m) => <option key={m} disabled={!c.modes.includes(m)}>{m}{c.modes.includes(m) ? '' : ' (not everyone)'}</option>)}
             </select>
+            {c.cost && <div className="notice"><span aria-hidden="true">Rs</span><span><b>Cost per trip:</b> {c.cost.text}</span></div>}
             {c.is_driver_mode && <div><p className="q" style={{ margin: '0 0 6px' }}>Driving rota · next 2 weeks</p>
               {c.rota.map((r) => (
                 <div className="who-row" key={r.day}><span><span className="mono sub">{fmt(r.day)}</span> · {r.name ? driveLabel(c.mode, { me: r.user_id === me.user_id, name: r.name }) : 'Nobody yet'}</span>

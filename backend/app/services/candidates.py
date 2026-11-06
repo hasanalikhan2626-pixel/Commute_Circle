@@ -17,6 +17,7 @@ def to_candidate(p: Profile) -> Candidate:
         user_id=p.user_id, location=area_coords(p.area), gender=p.gender.value,
         women_only=p.women_only and p.gender.value == "female", methods=tuple(p.methods or ()),
         has_car=p.has_car, seats=p.seats if p.has_car else 0, schedule=p.schedule or {},
+        has_bike=bool(p.has_bike),
     )
 
 

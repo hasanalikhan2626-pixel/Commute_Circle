@@ -19,7 +19,7 @@ from ..deps import admin_user
 from ..matching.algorithms import ALGORITHMS, EXACT
 from ..matching.compat import DAYS, METHODS
 from ..matching.evaluate import evaluate
-from ..matching.geo import haversine_km
+from ..matching import roads
 from ..models import (Circle, CircleStatus, Feedback, MatchRun, Profile, Report, ReportStatus, Role, Trip, TripMember,
                       TripStatus, User, UserStatus)
 from ..schemas import ApprovalIn, DissolveIn, MatchIn, ReportUpdate
@@ -90,7 +90,7 @@ def fares(db: Session = Depends(get_db), _: User = Depends(admin_user)):
                 continue
             v = trips.route_fares(db, a, md)
             if len(v) >= 3:
-                km = haversine_km(area_coords(a), CAMPUS()) * settings.road_factor
+                km = roads.km(area_coords(a), CAMPUS(), settings.road_factor)
                 rows.append({"area": a, "mode": md, "n": len(v), "median": round(median(v)), "road_km": round(km, 1),
                              "per_km": median(v) / km if km else 0})
     rows.sort(key=lambda r: -r["median"])

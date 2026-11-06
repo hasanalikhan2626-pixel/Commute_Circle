@@ -1,8 +1,9 @@
 """Metrics used to compare algorithms (Research Question 2)."""
 from __future__ import annotations
 
-from .compat import Rules, capacity, group_days, rider_detours_km, route_info
-from .fares import rate, solo_fare
+from .compat import Rules, capacity, group_days, rider_detours_min, route_info
+from . import roads
+from .fares import PASSENGER_PAYS, rate, solo_fare
 from .geo import haversine_km
 from .types import Candidate, MatchResult
 
@@ -26,13 +27,18 @@ def evaluate(result: MatchResult, pool: list[Candidate], rules: Rules, *, road_f
         shared.append(days)
         info = route_info(g, rules.campus, road_factor)
         first = by_id[info["order"][0]]
-        detours.append(max(0.0, info["road_km"] - haversine_km(first.location, rules.campus) * road_factor))
-        rider_min += [km / speed_kmh * 60 for km in rider_detours_km(g, rules.campus, road_factor).values()]
+        detours.append(max(0.0, info["road_km"] - roads.km(first.location, rules.campus, road_factor)))
+        rider_min += list(rider_detours_min(g, rules.campus, road_factor, speed_kmh).values())
         occupancy.append(len(g) / capacity(circ.mode, g))
         trip = info["road_km"] * rate(circ.mode, fuel_price, km_per_litre)
-        alone = sum(solo_fare(s.location, rules.campus, circ.mode, road_factor, fuel_price, km_per_litre) for s in g)
+        solos = {s.user_id: solo_fare(s.location, rules.campus, circ.mode, road_factor, fuel_price, km_per_litre) for s in g}
+        if circ.mode in PASSENGER_PAYS:
+            # the provider travels anyway (own bike, or the family's own car): not a saving.
+            prov = next((s.user_id for s in g if s.has_bike), None) if circ.mode == "Motorbike pillion" else None
+            solos.pop(prov if prov is not None else min(solos, key=solos.get), None)
+        alone = sum(solos.values())
         saved += max(0.0, alone - trip) * days
-        solo_km = sum(haversine_km(s.location, rules.campus) * road_factor for s in g)
+        solo_km = sum(roads.km(s.location, rules.campus, road_factor) for s in g)
         car_km_saved += max(0.0, solo_km - info["road_km"]) * days
     from .optimise import Valuer
     from .compat import Scorer

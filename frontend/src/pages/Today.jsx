@@ -94,6 +94,7 @@ export default function Today() {
 export const driveLabel = (mode, r) => {
   const n = r.me ? null : r.name
   if (mode === 'Classmate drives') return r.me ? 'You drive' : `${n} drives`
+  if (mode === 'Motorbike pillion') return r.me ? 'You ride' : `${n} rides`
   if (mode === 'Family driver') return r.me ? 'Your family driver' : `${n}’s family driver`
   return r.me ? 'Your parent drops' : `${n}’s parent drops`
 }
@@ -101,13 +102,13 @@ export const driveLabel = (mode, r) => {
 function FareCard({ t, onSave }) {
   const [custom, setCustom] = useState(false)
   const [amt, setAmt] = useState('')
-  const [payer, setPayer] = useState(t.payers.find((p) => p.name === 'Me')?.user_id)
+  const [payer, setPayer] = useState(t.default_payer ?? t.payers.find((p) => p.name === 'Me')?.user_id)
   const save = (share) => onSave({ share, payer_id: Number(payer) }, 'Fare saved and added to Money')
   return (
     <div className="card fare">
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}><p className="q" style={{ margin: 0 }}>Your share today? <span className="hint">(optional)</span></p>
         <label className="hint row" style={{ gap: 6, flexWrap: 'nowrap' }}>Paid by <select value={payer} onChange={(e) => setPayer(e.target.value)} style={{ width: 'auto', padding: '5px 8px' }}>{t.payers.map((p) => <option key={p.user_id} value={p.user_id}>{p.name}</option>)}</select></label></div>
-      <p className="hint" style={{ margin: '4px 0 10px' }}>Adds to your circle’s Money tab so everyone pays their fair share.</p>
+      <p className="hint" style={{ margin: '4px 0 10px' }}>Adds to your circle’s Money tab so everyone pays their fair share. {t.cost?.text}</p>
       <div className="opts">{t.suggestions.map((v) => <button key={v} className="opt" onClick={() => save(v)}>{rs(v)}</button>)}
         <button className="opt" onClick={() => setCustom(true)}>Other</button><button className="opt ghost" onClick={() => onSave({ skip: true })}>Skip</button></div>
       {custom && <div className="row" style={{ marginTop: 10, flexWrap: 'nowrap' }}><input type="number" min="1" step="10" placeholder="Amount in Rs" aria-label="Your share in rupees" value={amt} onChange={(e) => setAmt(e.target.value)} />

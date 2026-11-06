@@ -11,7 +11,8 @@ from ..areas import area_coords, short_area
 from ..config import settings
 from ..db import get_db
 from ..deps import current_user
-from ..matching.compat import DAYS, DRIVE_MODES, METHODS, circle_fit, fit_label, group_days, pair_fit, travel_modes
+from ..matching.compat import (DAYS, DRIVE_MODES, METHODS, circle_fit, fit_label, group_days, pair_fit,
+                              rider_detours_min, travel_modes)
 from ..models import (Absence, Circle, CircleStatus, Feedback, MemberStatus, Report, RotaEntry, SeatRequest,
                       SeatStatus, Settlement, Trip, TripStatus, User)
 from ..schemas import (AcceptIn, DayIn, FareIn, FeedbackIn, GoingIn, ModeIn, ReportIn, RespondIn, SeatIn, SettleIn,
@@ -67,6 +68,7 @@ def get_trip(user: User = Depends(current_user)):
     first = p.schedule[on[0]] if on else {"in": "08:30", "out": "14:00"}
     return {"area": p.area or None, "days": on, "arrive": first["in"], "leave": first["out"],
             "women_only": p.women_only, "methods": p.methods or [], "has_car": p.has_car, "seats": p.seats,
+            "has_bike": bool(p.has_bike),
             "schedule": p.schedule or {}, "gender": p.gender.value}
 
 
@@ -74,6 +76,7 @@ def get_trip(user: User = Depends(current_user)):
 def put_trip(body: TripIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     p = user.profile
     p.area, p.methods, p.has_car, p.seats = body.area, body.methods, body.has_car, body.seats
+    p.has_bike = body.has_bike
     p.women_only = body.women_only and p.gender.value == "female"
     p.schedule = body.schedule()
     db.flush()
@@ -102,12 +105,21 @@ def _option_out(db, user, grp) -> dict:
             "on_way": bool(p and p.on_way), "days_match": len(p.good_days) if p else None,
             "coords": area_coords(u.profile.area),
         })
-    rate = trips.rate_for("Shared ride-hailing")
+    from ..matching.fares import cost_card
+
+    det = rider_detours_min(grp, CAMPUS(), settings.road_factor, settings.avg_speed_kmh)
+    for m in members:
+        m["detour_min"] = round(det.get(m["user_id"], 0.0), 1)
+        c = next(x for x in grp if x.user_id == m["user_id"])
+        p = pair_fit(me, c, CAMPUS()) if c is not me else None
+        m["fit_parts"] = {"route": p.route, "near": p.near, "sched": p.sched, "pref": p.pref, "total": p.total} if p else None
+    cards = [cost_card(md, info["road_km"], len(grp), settings.fuel_price_pkr, settings.fuel_km_per_litre)
+             for md in travel_modes(grp)]
     return {"member_ids": [c.user_id for c in grp], "fit": fit, "label": fit_label(fit), "size": len(grp),
             "days": group_days(grp, settings.schedule_window_min), "mode": mode, "members": members,
-            "road_km": round(info["road_km"], 1),
-            "solo_fare": round(trips.solo(user, "Shared ride-hailing")),
-            "share_est": round(info["road_km"] * rate / len(grp))}
+            "road_km": round(info["road_km"], 1), "costs": cards,
+            "solo_fare": round(trips.solo(user, mode)),
+            "share_est": cards[0]["per_person"]}
 
 
 @router.get("/find/options")
@@ -168,8 +180,12 @@ def circle_out(db: Session, c: Circle, me: User) -> dict:
         "travel_days": td, "plan": plan, "rota": rota_rows,
         "road_km": round(trips.circle_route(c)["road_km"], 1),
         "whatsapp_name": f"CommuteCircle · {short_area(live[0].user.profile.area)} → BIC" if live else "",
-        "share_hint": round(max(50, trips.solo(me, "Shared ride-hailing") / max(2, len(live)))),
+        "share_hint": trips.circle_cost(c)["per_person"] if len(live) >= 2 else 0,
         "is_driver_mode": c.mode in DRIVE_MODES,
+        "cost": trips.circle_cost(c) if len(live) >= 2 else None,
+        "detours": {str(k): round(v, 1) for k, v in rider_detours_min(
+            [to_candidate(m.user.profile) for m in live], CAMPUS(), settings.road_factor, settings.avg_speed_kmh).items()}
+        if len(live) >= 2 else {},
     }
 
 
@@ -267,7 +283,7 @@ def today_view(user: User = Depends(current_user), db: Session = Depends(get_db)
     trip = None
     if t and mine is not None:
         conf = db.get(User, t.confirmed_by) if t.confirmed_by else None
-        share = (t.total / went) if (t.total and t.total > 0 and went) else None
+        share = trips.share_of(t, user.id)
         trip = {
             "confirmed": bool(t.confirmed_by), "confirmed_by_me": t.confirmed_by == user.id,
             "confirmed_by": ("You" if conf and conf.id == user.id else short(conf.full_name)) if conf else None,
@@ -279,6 +295,9 @@ def today_view(user: User = Depends(current_user), db: Session = Depends(get_db)
             "suggestions": trips.share_suggestions(db, user, c),
             "payers": [{"user_id": m.user_id, "name": "Me" if m.user_id == user.id else short(db.get(User, m.user_id).full_name)}
                        for m in t.members if m.status == TripStatus.went],
+            "default_payer": (rt_today.user_id if (rt_today := (db.scalar(select(RotaEntry).filter_by(circle_id=c.id, day=day))
+                              if c.mode in DRIVE_MODES else None)) and rt_today.user_id else user.id),
+            "cost": trips.circle_cost(c),
             "demo_other": next((short(users[m.user_id].full_name) for m in t.members
                                 if m.user_id != user.id and m.status == TripStatus.planned), None),
         }
@@ -370,7 +389,8 @@ def today_fare(body: FareIn, user: User = Depends(current_user), db: Session = D
         payer = body.payer_id or user.id
         if payer not in travellers:
             raise HTTPException(422, "The payer must be someone who travelled")
-        t.total, t.payer_id = body.share * len(travellers), payer
+        t.payer_id = payer
+        t.total = body.share * len(trips.sharers(t))  # passenger-pays modes: the provider is not charged
     db.commit()
     return {"ok": True}
 
@@ -465,9 +485,9 @@ def money(user: User = Depends(current_user), db: Session = Depends(get_db)):
         q = q.where(Trip.day > c.settled_until)
     recent = []
     for t in db.scalars(q):
-        mine = trips.status_of(t, user.id) == TripStatus.went
+        mine = trips.share_of(t, user.id)
         recent.append({"day": t.day.isoformat(), "payer": names.get(t.payer_id, "Former member"), "total": t.total,
-                       "my_share": round(t.total / trips.went_count(t)) if mine else None})
+                       "my_share": round(mine) if mine is not None else None})
     return {"balance": round(net.get(user.id, 0.0)), "settled_until": c.settled_until.isoformat() if c.settled_until else None,
             "lines": lines, "members": [{"user_id": m.user_id, "name": names[m.user_id], "net": round(net.get(m.user_id, 0))}
                                         for m in c.members if m.status in LIVE],
@@ -507,8 +527,9 @@ def savings(user: User = Depends(current_user), db: Session = Depends(get_db)):
         q = select(TripMember, Trip).join(Trip).where(TripMember.user_id == user.id, TripMember.status == TripStatus.went,
                                                       Trip.confirmed_by.is_not(None), Trip.total > 0)
         for tm, t in db.execute(q):
-            if t.day in ws:
-                paid += t.total / trips.went_count(t)
+            mine = trips.share_of(t, user.id)
+            if t.day in ws and mine is not None:
+                paid += mine
                 solo_ += trips.solo(user, t.mode)
         weeks.append({"label": f"Week {i + 1}", "paid": round(paid), "solo": round(solo_)})
     guide = []

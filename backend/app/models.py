@@ -101,6 +101,7 @@ class Profile(Base):
     methods: Mapped[list] = mapped_column(JSON, default=list)  # ways the student is happy to travel
     has_car: Mapped[bool] = mapped_column(Boolean, default=False)  # needed for "Classmate drives"
     seats: Mapped[int] = mapped_column(Integer, default=0)
+    has_bike: Mapped[bool] = mapped_column(Boolean, default=False)  # needed for "Motorbike pillion"
     # {"Mon": {"in": "08:30", "out": "14:00"}, ...}; a missing day = not on campus
     schedule: Mapped[dict] = mapped_column(JSON, default=dict)
     seeking: Mapped[bool] = mapped_column(Boolean, default=True)

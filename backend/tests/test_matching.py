@@ -21,7 +21,7 @@ def cand(uid, area="Gulshan-e-Iqbal Block 13", g="female", wo=False, methods=(SH
 
 def pool_from(rows):
     return [Candidate(s["user_id"], AREAS[s["area"]], s["gender"], s["women_only"], tuple(s["methods"]),
-                      s["has_car"], s["seats"], s["schedule"]) for s in rows]
+                      s["has_car"], s["seats"], s["schedule"], s.get("has_bike", False)) for s in rows]
 
 
 def test_same_area_same_times_is_a_great_fit():
@@ -201,3 +201,42 @@ def test_feasibility_is_per_set_founder_first():
     assert not sc.feasible([a, b, c]) and not sc.feasible([c, a, b]) and sc.feasible([b, a, c])
     assert [x.user_id for x in sc.arrange([a, b, c])][0] == 2
     assert sc.circle_fit([a, b, c]) == sc.circle_fit([c, b, a])  # fit is order-independent
+
+
+def test_road_matrix_and_fallback(monkeypatch):
+    from app.matching import roads
+
+    g13 = AREAS["Gulshan-e-Iqbal Block 13"]
+    assert roads.using_matrix(CAMPUS)
+    straight = haversine_km(g13, CAMPUS)
+    assert 1.1 * straight < roads.km(g13, CAMPUS) < 2 * straight  # real roads are longer than a straight line
+    monkeypatch.setenv("CC_TRAFFIC_FACTOR", "1.0")
+    free = roads.minutes(g13, CAMPUS)
+    monkeypatch.setenv("CC_TRAFFIC_FACTOR", "2.0")
+    assert roads.minutes(g13, CAMPUS) == pytest.approx(2 * free)
+    odd = (24.9, 67.0)  # not a pickup area: straight line x 1.35 at 22 km/h
+    assert roads.km(odd, CAMPUS) == pytest.approx(haversine_km(odd, CAMPUS) * 1.35)
+    assert roads.minutes(odd, CAMPUS) == pytest.approx(haversine_km(odd, CAMPUS) * 1.35 / 22 * 60)
+
+
+def test_motorbike_pillion_rules():
+    MB = "Motorbike pillion"
+    rider, pillion = cand(1, g="male", methods=(MB,)), cand(2, g="male", methods=(MB,))
+    rider = Candidate(**{**rider.__dict__, "has_bike": True})
+    assert travel_modes([rider, pillion]) == [MB]
+    assert travel_modes([pillion, cand(3, g="male", methods=(MB,))]) == []  # nobody has a bike
+    assert travel_modes([rider, pillion, cand(3, g="male", methods=(MB,))]) == []  # a bike carries 2
+
+
+def test_cost_card_matches_appendix_c():
+    from app.matching.fares import cost_card, payers
+
+    bike = cost_card("Motorbike pillion", 15, 2, 352.59, 12)
+    assert bike["total"] == 225 and bike["per_person"] == 225 and bike["payers"] == 1  # Rs 15/km x 15 km
+    hail = cost_card("Shared ride-hailing", 18.3, 4, 352.59, 12)
+    assert hail["total"] == round(52 * 18.3) and hail["per_person"] == round(52 * 18.3 / 4) and "split 4 ways" in hail["text"]
+    parent = cost_card("Parent drop", 15, 3, 352.59, 12)
+    assert parent["total"] == 300 and parent["payers"] == 2 and parent["per_person"] == 150  # Rs 20/km, 2 passengers
+    car = cost_card("Classmate drives", 12, 4, 352.59, 12)
+    assert car["total"] == round(12 / 12 * 352.59) and car["payers"] == 4  # fuel split with the driver
+    assert payers("Family driver", 4) == 3 and payers("Rickshaw", 3) == 3

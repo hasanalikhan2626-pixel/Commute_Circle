@@ -112,6 +112,25 @@ def went_count(t: Trip) -> int:
     return sum(1 for m in t.members if m.status == TripStatus.went)
 
 
+def sharers(t: Trip) -> list[int]:
+    """Who shares this trip's fare: everyone who travelled, except the payer when the payer is
+    the provider in a passenger-pays mode (motorbike rider, host family)."""
+    from ..matching.fares import PASSENGER_PAYS
+
+    went = [m.user_id for m in t.members if m.status == TripStatus.went]
+    if t.mode in PASSENGER_PAYS and t.payer_id in went and len(went) > 1:
+        went = [u for u in went if u != t.payer_id]
+    return went
+
+
+def share_of(t: Trip, user_id: int) -> float | None:
+    """This member's share of the trip's fare (None if no fare entered or they didn't pay in)."""
+    if not (t.total and t.total > 0):
+        return None
+    s = sharers(t)
+    return t.total / len(s) if user_id in s else None
+
+
 def confirm(t: Trip, by: int) -> None:
     for m in t.members:
         if m.status == TripStatus.planned:
@@ -146,8 +165,8 @@ def user_stats(db: Session, u: User) -> dict:
             went += 1
             if t.day >= cut:
                 trips14 += 1
-            if t.total and t.total > 0 and u.profile:
-                share = t.total / max(1, went_count(t))
+            share = share_of(t, u.id)
+            if share is not None and u.profile:
                 paid += share
                 saved += max(0.0, solo(u, t.mode) - share)
         elif tm.status == TripStatus.noshow:
@@ -188,12 +207,11 @@ def balances(db: Session, c: Circle) -> dict[int, float]:
     if c.settled_until:
         q = q.where(Trip.day > c.settled_until)
     for t in db.scalars(q):
-        n = went_count(t)
-        if not n:
+        who = sharers(t)
+        if not who:
             continue
-        for m in t.members:
-            if m.status == TripStatus.went:
-                net[m.user_id] = net.get(m.user_id, 0.0) - t.total / n
+        for u in who:
+            net[u] = net.get(u, 0.0) - t.total / len(who)
         net[t.payer_id] = net.get(t.payer_id, 0.0) + t.total
     for s in db.scalars(select(Settlement).where(Settlement.circle_id == c.id)):
         if s.from_id in net:
@@ -230,18 +248,23 @@ def route_fares(db: Session, area: str, mode: str) -> list[float]:
     out = []
     q = select(Trip).where(Trip.mode == mode, Trip.total > 0, Trip.confirmed_by.is_not(None))
     for t in db.scalars(q):
-        n = went_count(t)
-        for m in t.members:
-            if m.status == TripStatus.went:
-                u = db.get(User, m.user_id)
-                if u and u.profile and u.profile.area == area:
-                    out.append(t.total / n)
+        for uid in sharers(t):
+            u = db.get(User, uid)
+            if u and u.profile and u.profile.area == area:
+                out.append(t.total / len(sharers(t)))
     return out
+
+
+def circle_cost(c: Circle) -> dict:
+    from ..matching.fares import cost_card
+
+    return cost_card(c.mode, circle_route(c)["road_km"], max(2, len(_live_users(c))),
+                     settings.fuel_price_pkr, settings.fuel_km_per_litre)
 
 
 def share_suggestions(db: Session, u: User, c: Circle) -> list[int]:
     v = route_fares(db, u.profile.area, c.mode)
-    md = median(v) if v else max(50.0, solo(u, c.mode) / max(2, len(_live_users(c))))
+    md = median(v) if v else max(10.0, circle_cost(c)["per_person"])
     r = lambda x: max(10, round(x / 10) * 10)  # noqa: E731
     return [r(md * 0.85), r(md), r(md * 1.15)]
 

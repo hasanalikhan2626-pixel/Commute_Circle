@@ -232,3 +232,18 @@ def test_savings(client):
     s = client.get("/api/savings", headers=hs[1]).json()
     assert s["tiles"]["went"] == 1 and s["tiles"]["paid"] == 200 and s["weeks"][-1]["paid"] == 200
     assert any(g["mode"] == SH and g["n"] == 2 and g["median"] == 200 for g in s["guide"])  # one share per traveller
+
+
+def test_passenger_pays_modes_do_not_charge_the_provider(client):
+    hs = [student(client, i, methods=("Family driver",)) for i in range(1, 4)]
+    c = circle_of(client, hs)
+    assert c["mode"] == "Family driver" and c["cost"]["payers"] == 2  # host family pays nothing
+    t = client.get("/api/today", headers=hs[0]).json()["trip"]
+    host = t["default_payer"]
+    hh = next(h for h in hs if me(client, h)["id"] == host)
+    client.post("/api/today/yes", headers=hh)
+    client.post("/api/today/fare", json={"share": 100, "payer_id": host}, headers=hh)
+    m = client.get("/api/money", headers=hh).json()
+    assert m["balance"] == 200  # two passengers x Rs 100; the host isn't charged their own share
+    others = [h for h in hs if h is not hh]
+    assert all(client.get("/api/money", headers=h).json()["balance"] == -100 for h in others)

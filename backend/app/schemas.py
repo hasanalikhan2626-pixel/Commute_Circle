@@ -102,6 +102,7 @@ class TripIn(BaseModel):
     methods: list[str] = Field(min_length=1)
     has_car: bool = False
     seats: int = Field(default=0, ge=0, le=6)
+    has_bike: bool = False
     # Optional per-day exceptions, e.g. {"Tue": {"in": "10:00", "out": "16:00"}}
     exceptions: dict[str, dict[str, str]] = {}
 
@@ -141,6 +142,8 @@ class TripIn(BaseModel):
             raise ValueError("Offer at least one seat if you drive")
         if not self.has_car:
             self.seats = 0
+        if "Motorbike pillion" not in self.methods:
+            self.has_bike = False
         return self
 
     def schedule(self) -> dict:

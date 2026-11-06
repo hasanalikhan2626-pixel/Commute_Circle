@@ -13,7 +13,7 @@ Hard rules for a circle:
   * at least one weekday on which everyone arrives within ``window`` (20) minutes
     of the circle's first member
   * a way of travelling everyone accepts; "Classmate drives" also needs a member
-    with a car and enough seats
+    with a car and enough seats; "Motorbike pillion" a member with a motorbike (2 people)
   * no pair that a student previously declined
   * no rider's estimated detour exceeds ``max_detour_min`` (12 minutes, proposal
     section 13): extra road km / assumed average speed
@@ -27,11 +27,11 @@ from .geo import detour_ratio, haversine_km, pickup_route_km
 from .types import Candidate
 
 DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri")
-METHODS = ("Shared ride-hailing", "Classmate drives", "Family driver", "Parent drop", "Rickshaw")
-DRIVE_MODES = ("Classmate drives", "Family driver", "Parent drop")  # these get a rota
+METHODS = ("Shared ride-hailing", "Classmate drives", "Family driver", "Parent drop", "Rickshaw", "Motorbike pillion")
+DRIVE_MODES = ("Classmate drives", "Family driver", "Parent drop", "Motorbike pillion")  # these get a rota
 # Passengers each way of travelling can carry (proposal Appendix C). "Classmate drives"
 # depends on the driver's seats and is checked separately.
-MODE_CAPACITY = {"Shared ride-hailing": 4, "Family driver": 4, "Parent drop": 4, "Rickshaw": 3}
+MODE_CAPACITY = {"Shared ride-hailing": 4, "Family driver": 4, "Parent drop": 4, "Rickshaw": 3, "Motorbike pillion": 2}
 MIN_FIT = 45
 
 
@@ -125,6 +125,8 @@ def travel_modes(group: list[Candidate]) -> list[str]:
             continue
         if m == "Classmate drives" and not any(s.has_car and s.seats >= len(group) - 1 for s in group):
             continue
+        if m == "Motorbike pillion" and not any(s.has_bike for s in group):
+            continue
         if len(group) > MODE_CAPACITY.get(m, 99):
             continue
         out.append(m)
@@ -144,6 +146,7 @@ class Scorer:
         self._fit: dict[tuple[int, int], PairFit | None] = {}
         self._ok: dict[tuple[int, int], bool] = {}
         self._arr: dict[int, dict[str, int]] = {}
+        self._det: dict[frozenset, dict[int, float]] = {}
         self.idx: dict[int, int] = {}
         if pool:
             self._prepare(pool)
@@ -296,8 +299,11 @@ class Scorer:
         return None
 
     def rider_detour_min(self, group: list[Candidate]) -> dict[int, float]:
-        r = self.rules
-        return {u: km / r.speed_kmh * 60 for u, km in rider_detours_km(group, r.campus, r.road_factor).items()}
+        key = frozenset(c.user_id for c in group)  # pickup order depends only on who is in it
+        if key not in self._det:
+            r = self.rules
+            self._det[key] = rider_detours_min(group, r.campus, r.road_factor, r.speed_kmh)
+        return self._det[key]
 
     def detour_ok(self, group: list[Candidate]) -> bool:
         lim = self.rules.max_detour_min
@@ -326,9 +332,29 @@ def fit_label(v: int) -> str:
     return "Great fit" if v >= 75 else "Good fit" if v >= 60 else "Fair fit"
 
 
+def _route_seq(group: list[Candidate], campus: tuple[float, float]) -> list[Candidate]:
+    order, _ = pickup_route_km([s.location for s in group], campus)  # furthest-first (prototype rule)
+    return [group[i] for i in order]
+
+
 def route_info(group: list[Candidate], campus: tuple[float, float], road_factor: float) -> dict:
-    order, km = pickup_route_km([s.location for s in group], campus)
-    return {"order": [group[i].user_id for i in order], "road_km": km * road_factor}
+    """Pickup order and road km of the whole trip (OSRM road distances where known)."""
+    from . import roads
+
+    seq = _route_seq(group, campus)
+    pts = [s.location for s in seq] + [campus]
+    km = sum(roads.km(pts[i], pts[i + 1], road_factor) for i in range(len(pts) - 1))
+    return {"order": [s.user_id for s in seq], "road_km": km}
+
+
+def _rider_extra(group, campus, leg) -> dict[int, float]:
+    seq = _route_seq(group, campus)
+    pts = [s.location for s in seq] + [campus]
+    out = {}
+    for k, s in enumerate(seq):
+        ride = sum(leg(pts[j], pts[j + 1]) for j in range(k, len(pts) - 1))
+        out[s.user_id] = max(0.0, ride - leg(s.location, campus))
+    return out
 
 
 def rider_detours_km(group: list[Candidate], campus: tuple[float, float], road_factor: float) -> dict[int, float]:
@@ -337,14 +363,18 @@ def rider_detours_km(group: list[Candidate], campus: tuple[float, float], road_f
     Pickups run furthest-first (prototype rule), so the first person picked up rides
     past everyone else's pickup; the last rides almost directly.
     """
-    order, _ = pickup_route_km([s.location for s in group], campus)
-    seq = [group[i] for i in order]
-    out = {}
-    for k, s in enumerate(seq):
-        ride = sum(haversine_km(seq[j].location, seq[j + 1].location) for j in range(k, len(seq) - 1))
-        ride += haversine_km(seq[-1].location, campus)
-        out[s.user_id] = max(0.0, ride - haversine_km(s.location, campus)) * road_factor
-    return out
+    from . import roads
+
+    return _rider_extra(group, campus, lambda a, b: roads.km(a, b, road_factor))
+
+
+def rider_detours_min(group: list[Candidate], campus: tuple[float, float], road_factor: float,
+                      speed_kmh: float) -> dict[int, float]:
+    """Extra minutes each member rides compared with going straight to campus (OSRM times x
+    traffic factor where known; otherwise road km at ``speed_kmh``)."""
+    from . import roads
+
+    return _rider_extra(group, campus, lambda a, b: roads.minutes(a, b, road_factor, speed_kmh))
 
 
 def capacity(mode: str, group: list[Candidate]) -> int:

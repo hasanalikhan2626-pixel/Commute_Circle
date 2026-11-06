@@ -32,7 +32,7 @@ EXACT_MAX = 90  # the MILP optimum is computed for pools up to this size
 
 def _cand(s: dict, uid: int) -> Candidate:
     return Candidate(uid, area_coords(s["area"]), s["gender"], s["women_only"], tuple(s["methods"]),
-                     s.get("has_car", False), s.get("seats", 0), s["schedule"])
+                     s.get("has_car", False), s.get("seats", 0), s["schedule"], s.get("has_bike", False))
 
 
 def prototype_pool() -> list[Candidate]:

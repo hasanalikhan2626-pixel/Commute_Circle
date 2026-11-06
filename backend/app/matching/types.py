@@ -16,6 +16,7 @@ class Candidate:
     has_car: bool
     seats: int
     schedule: dict  # "Mon" -> {"in": "HH:MM", "out": "HH:MM"}; missing day = not on campus
+    has_bike: bool = False  # can offer "Motorbike pillion"
 
 
 @dataclass

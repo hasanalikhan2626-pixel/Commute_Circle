@@ -168,8 +168,9 @@ def make_students(n: int, seed: int = 42) -> list[dict]:
         if rng.random() < 0.6 and "Shared ride-hailing" not in methods:
             methods.append("Shared ride-hailing")
         car = "Classmate drives" in methods and rng.random() < 0.5
+        bike = "Motorbike pillion" in methods and g == "male" and rng.random() < 0.6
         out.append(dict(user_id=i, gender=g, area=area, women_only=g == "female" and rng.random() < 0.5,
-                        methods=methods, has_car=car, seats=3 if car else 0,
+                        methods=methods, has_car=car, seats=3 if car else 0, has_bike=bike,
                         schedule={dm[c]: {"in": arr, "out": lv} for c in days}))
     return out
 
