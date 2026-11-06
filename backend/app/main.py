@@ -21,6 +21,9 @@ STATIC = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 async def lifespan(_: FastAPI):
     settings.check()
     migrate(engine)
+    from .seed import seed_if_empty
+
+    seed_if_empty()
     bootstrap_admin()
     yield
 

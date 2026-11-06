@@ -134,6 +134,19 @@ def seed(empty: bool = False, weeks: int = 4, rng_seed: int = 20261103) -> None:
           "  admin@bic.edu.pk / admin12345\n  ayesha.khan@bic.edu.pk (and others) / student123")
 
 
+def seed_if_empty() -> None:
+    """For a demo deployment with no shell: CC_SEED_DEMO=true loads the demo data once,
+    only into an empty database, and never when CC_ENV=production."""
+    import os
+
+    if os.environ.get("CC_SEED_DEMO", "").lower() not in ("1", "true", "yes") or settings.production:
+        return
+    with SessionLocal() as db:
+        if db.query(User).count():
+            return
+    seed()
+
+
 def make_students(n: int, seed: int = 42) -> list[dict]:
     """Random synthetic students in the prototype's style (benchmark only)."""
     rng = random.Random(seed)

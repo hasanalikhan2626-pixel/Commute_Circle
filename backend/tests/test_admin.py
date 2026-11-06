@@ -139,3 +139,21 @@ def test_v1_schema_with_students_is_never_wiped(tmp_path):
         migrate(eng)
     with eng.connect() as c:
         assert c.execute(text("SELECT count(*) FROM users")).scalar() == 1
+
+
+def test_demo_seed_only_into_empty_non_production_db(monkeypatch, db):
+    import app.seed as seed_mod
+    from app import config
+    from app.models import User
+
+    monkeypatch.setenv("CC_SEED_DEMO", "true")
+    seed_mod.seed_if_empty()
+    n = db.query(User).count()
+    assert n == 72  # 71 prototype students + Student Affairs
+    seed_mod.seed_if_empty()  # not empty any more: no-op
+    assert db.query(User).count() == n
+    monkeypatch.setattr(seed_mod, "settings", config.Settings(env="production"))
+    db.query(User).delete()
+    db.commit()
+    seed_mod.seed_if_empty()
+    assert db.query(User).count() == 0

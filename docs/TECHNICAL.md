@@ -1,234 +1,237 @@
-# CommuteCircle: Technical Documentation (MVP, Week 9)
+# CommuteCircle: Technical Documentation
 
-_Version 1.1. Campus: BIC Karachi, 273/1/A Main Ibrahim Hyderi Road, Korangi Creek, Karachi 75190._
+_Version 2.0 (December 2026). Rebuilt to match the CommuteCircle prototype
+(`CommuteCircle_Prototype.html`). Campus: BIC Karachi, 273/1/A Main Ibrahim Hyderi Road,
+Korangi Creek, Karachi 75190 (24.8086702, 67.1217257)._
 
 ## 1. Overview
 
-CommuteCircle is a web application that groups BIC Karachi students into carpool
-"circles". It has two user types:
+CommuteCircle introduces BIC students who live near each other, or on each other's way,
+and come to campus at the same times, so they can travel together. BIC doesn't arrange
+transport: the app only introduces classmates, and they decide how to travel.
 
-* **Students** register with their BIC email, describe their commute (area, timetable,
-  car/seats, gender preference), accept or decline proposed circles, see contacts,
-  the driving rota and cost split once a circle is confirmed, and can report members.
-* **Transport office (admin)** compares matching algorithms on the live pool, runs
-  matching, monitors circles, dissolves circles, reviews reports and suspends accounts.
+| Students (prototype tabs) | Student Affairs (prototype tabs) |
+|---|---|
+| **Find my circle**: three questions, then up to three circle options with a 0–100 fit score and a map | **Usage**: totals, trips per day, demand map, gaps by area |
+| **Today**: one-tap “Reached campus?”, fare entry, “Not going tomorrow”, one-day seat in another circle, streaks | **Fares**: what students actually pay, by area and way of travelling |
+| **My circle**: members, show-up rate and badges, weekly plan, travel mode, driving rota, private feedback, re-match, report or leave | **Circle health**: completion, no-shows and negative feedback, with “Check in” flags |
+| **Money**: who paid, who owes, settle-up | **Approvals**: checking each sign-up against the student record |
+| **My savings**: alone vs your share, fare guide | **Reports**: decisions, suspension, private negative feedback |
+| | **Matching lab** (research) and **Students** |
 
-## 2. Architecture
+## 2. What changed from the prototype
+
+The prototype was a single HTML page with dummy data in memory. Version 2 keeps its
+screens, wording, styles and matching method, and adds what a real service needs.
+
+| Prototype | Version 2 |
+|---|---|
+| “Testing as” switcher, data resets on reload | Real accounts (BIC email + password), PostgreSQL database |
+| Approvals list with dummy sign-ups | Every new account is *pending* until Student Affairs approves it |
+| Accepting a circle = everyone accepts at once | The others are asked; numbers are shared only when all accept; proposals lapse after 3 days |
+| “Find my circle” overwrote per-day times with one arrive/leave time | Per-day times are kept (“Different times on some days”) |
+| Re-match removed people from other circles immediately | The old circle is left only once the new one is confirmed |
+| Rota assigned turns by position | Fair rota from turn history, “Can’t do it” / “I’ll take it” |
+| Seat request accepted automatically | The host circle accepts or declines |
+| A circle could form with no travel method in common | A common way of travelling is required (and a car with enough seats for “Classmate drives”) |
+| WhatsApp group shown as “Created” | Shown as a preview (“Coming soon”): no group is actually created |
+
+## 3. Architecture
 
 ```
-React SPA (Vite)  ──HTTPS/JSON──▶  FastAPI  ──SQLAlchemy──▶  SQLite (dev) / PostgreSQL (prod)
-  frontend/src                     backend/app
-                                     ├─ routers/    HTTP layer, auth, validation
-                                     ├─ services/   circle lifecycle, rota, costs
-                                     └─ matching/   pure algorithms + evaluation
+React SPA (Vite)  ──JSON over HTTPS──▶  FastAPI  ──SQLAlchemy──▶  PostgreSQL (Neon) / SQLite (dev)
+frontend/src                            backend/app
+  pages/          one file per tab        routers/     HTTP, auth, validation (student.py, admin.py)
+  components/Map  the prototype map       services/    circles, trips & money, rota, clock
+  styles.css      the prototype CSS       matching/    pure algorithms, fit score, fares, evaluation
+                                          migrate.py   Alembic migrations on start-up
 ```
 
-* **Layering.** Routers handle HTTP and permissions only. Services hold business
-  rules. `matching/` is pure Python with no database access, so the algorithms can be
-  unit-tested and benchmarked in isolation (the research component).
-* **Deployment.** In production, FastAPI serves the built frontend from `frontend/dist`,
-  so the whole app is one process behind one origin (no CORS needed).
-* **Configuration** comes from `CC_*` environment variables (`backend/app/config.py`):
+* **Pure matching core.** `matching/` has no database access, so the algorithms are
+  unit-tested and benchmarked on their own (`python -m app.benchmark`).
+* **Single deployable.** FastAPI serves the built React app from `frontend/dist`
+  (the Dockerfile builds both). Render runs the container; Neon holds the database.
+* **Karachi time.** “Today” is the date in Asia/Karachi (`services/clock.py`), not the
+  server's time zone. Weekends have no trips.
+* **Configuration** (`backend/app/config.py`, environment variables):
 
   | Variable | Default | Notes |
   |---|---|---|
-  | `CC_ENV` | development | `production` turns on the safety checks below |
+  | `CC_ENV` | development | `production` enables the safety checks below |
   | `CC_SECRET_KEY` | dev value | ≥ 32 random characters in production |
-  | `CC_DATABASE_URL` | SQLite file | PostgreSQL required in production; `postgres://` URLs accepted |
-  | `CC_EMAIL_DOMAINS` | bic.edu.pk | Only these domains can register |
-  | `CC_CAMPUS_LAT/LNG` | 24.8086702, 67.1217257 | Campus map pin (Ibrahim Hyderi Road, Korangi Creek) |
-  | `CC_FUEL_PRICE_PKR` | 352.59 | Petrol price per litre |
-  | `CC_FUEL_KM_PER_LITRE` | 12 | Average car efficiency |
+  | `CC_DATABASE_URL` | SQLite file | PostgreSQL in production; `postgres://` accepted |
+  | `CC_EMAIL_DOMAINS` | bic.edu.pk | Only these can register |
+  | `CC_CAMPUS_LAT/LNG` | 24.8086702, 67.1217257 | Campus map pin |
+  | `CC_FUEL_PRICE_PKR` | 352.59 | Used for “Classmate drives” fuel sharing |
+  | `CC_ADMIN_EMAIL` / `CC_ADMIN_PASSWORD` | – | Creates the first admin on start-up (hosts with no shell) |
+  | `CC_SEED_DEMO` | – | `true` loads the prototype's demo data into an *empty*, non-production database |
 
-  In production the app **refuses to start** with a weak secret key, SQLite, or no email
-  domain, hides the Swagger docs, and the seed script refuses to run (it would wipe real data).
+  In production the app refuses to start with a weak secret, SQLite or no email domain;
+  the API docs are hidden and the seed script refuses to run.
 
-## 3. Data model
+## 4. Data model
 
-| Table | Purpose | Key fields |
-|---|---|---|
-| `users` | Accounts | email (unique), password_hash (bcrypt), role, phone (normalised +92…), is_active, consented_at, consent_version, research_consent |
-| `profiles` | Commute preferences, **only edited by the student** | area, pickup_landmark, gender, same_gender_only, has_car, seats, schedule (JSON per day), seeking |
-| `circles` | A carpool group | status (proposed/active/dissolved), algorithm, score, dissolved_reason |
-| `circle_members` | Membership | is_driver, status (pending/accepted/declined/left) |
-| `rota_entries` | Who drives which day | day, driver_id, arrive |
-| `driver_unavailability` | Days a driver can't drive | circle_id, user_id, day |
-| `declined_pairs` | Pairs never to propose again | user_id, other_id |
-| `reports` | Safety reports | reason, details, status, admin_note; reporter/reported set to NULL if an account is deleted |
-| `match_runs` | Audit log and research data for every run | algorithm, pool_size, metrics (JSON) |
-
-**Privacy by design.** No home address or GPS coordinates are stored. Students choose
-an *area*; distances use approximate area centroids (`app/areas.py`). Phone numbers and
-pickup landmarks are hidden until **every** member has accepted the circle.
-
-## 4. Circle lifecycle
-
-```
-             run_matching
- (seeking) ───────────────▶ PROPOSED ──all accept──▶ ACTIVE
-                               │                       │
-                 decline ──────┤                leave / suspend / admin
-                               ▼                       ▼
-              still feasible? ─no──▶ DISSOLVED ◀── still feasible? no
-                     │ yes
-                     └─ stays PROPOSED / ACTIVE (rota rebuilt)
-```
-
-* A decline records `declined_pairs` so the same pairing is not proposed again.
-* After any membership change the circle is re-checked against every hard constraint
-  (`services/circles.py::_settle`). Members whose circle dissolves return to the pool.
-* Editing a profile never dissolves a circle automatically; the student is warned if
-  the change breaks it.
-
-## 5. Matching engine (`backend/app/matching/`)
-
-### 5.1 Hard constraints (`compat.py::feasible`)
-1. 2 to 5 members, with at least one driver; size ≤ largest car's seats + 1.
-2. Same-gender preference: if any member requires it, all members share one disclosed gender.
-3. At least 2 days a week when **all** members are on campus and arrivals fall within 30 minutes.
-4. The best driver's detour to collect everyone is ≤ 6 km (straight line).
-5. No previously declined pair.
-
-### 5.2 Soft score
-For each pair: `0.6 × schedule overlap (shared days / union of days) + 0.4 × proximity`,
-where proximity falls linearly from 1 to 0 over 8 km. A circle's score is the mean over its pairs.
-
-### 5.3 Algorithms compared
-| ID | Approach |
+| Table | Purpose |
 |---|---|
-| `greedy` (baseline) | Drivers in order of seats; each takes the nearest riders that keep the circle feasible. |
-| `cluster` | k-means++ on locations (k = ⌈n/4⌉), then split each cluster into feasible circles. |
-| `compatibility` (proposed) | Build the compatibility graph; seed circles from the **most constrained** drivers; grow by highest average pairwise score, preferring riders over spare drivers; repair pass places leftovers into circles with spare seats, then forms new circles from what remains. |
+| `users` | Account, role, status (pending / approved / rejected / suspended), consent version and time, research consent |
+| `profiles` | Gender, programme, year, area, women-only, ways of travelling, car and seats, weekly timetable (per-day arrive/leave) |
+| `circles`, `circle_members` | Circle (proposed / active / dissolved), way of travelling, fit, who found it; members in order |
+| `trips`, `trip_members` | One circle trip per day: travelled / not going / didn't turn up, who confirmed, fare total and payer; guests from other circles |
+| `absences` | “Not going tomorrow” |
+| `rota_entries`, `rota_unavailable` | Who drives or drops each day; days someone can't |
+| `settlements` | “I've paid” / “Mark as received” |
+| `feedback` | Private 👍/👎 with a tag |
+| `seat_requests` | One-day seats in another circle |
+| `declined_pairs` | Pairs never suggested together again |
+| `reports`, `match_runs` | Safety reports; research batch runs |
 
-All three are deterministic for a given seed.
+Schema changes go through **Alembic** (`backend/migrations`). On start-up `app/migrate.py`
+creates or upgrades the schema. A database still on the v1 layout is rebuilt only if it
+holds **no student accounts** (admin logins are carried across); otherwise the app refuses
+to start rather than risk data.
 
-### 5.4 Metrics (`evaluate.py`)
-Match rate, number and size of circles, mean compatibility, mean detour, mean shared
-days, and estimated weekly km, fuel (PKR) and CO₂ saved compared with everyone driving alone.
+**Privacy by design.** Students choose an area, never an address. Suggested circles show
+first name, initial, programme and area. Phone numbers appear only once every member has
+accepted. Student Affairs screens show totals; names appear only for approvals and reports.
 
-### 5.5 Preliminary results (synthetic data)
+## 5. Matching (ported from the prototype)
 
-`python -m app.benchmark` generates 5 independent synthetic pools at each size (campus
-at Korangi Creek, south-east areas weighted as most common) and reports mean ± SD.
-The raw output is in `docs/benchmark-synthetic.csv`.
+### 5.1 Fit score (`matching/compat.py::pair_fit`)
+For student A looking at classmate B, 0–100:
 
-| Pool | Algorithm | Match rate | Avg compatibility | Avg detour km | Fuel saved PKR/wk | Runtime ms |
+| Part | Points | Rule |
+|---|---|---|
+| Route | 40 | 0 % detour → 40, falling to 0 at 35 % extra distance (better of the two pickup orders) |
+| Nearby | 20 | ≤ 1.5 km apart → 20, falling to 0 at 8 km |
+| Timetable | 30 | For each of A's days: arrival within 15 min = 1, within 30 = 0.5 (70 %); leaving time likewise (30 %) |
+| Travel | 10 | At least one way of travelling in common |
+
+“On your way” = detour ≤ 12 %. A circle's fit is the average over all its pairs:
+75+ “Great fit”, 60+ “Good fit”, otherwise “Fair fit”. Minimum to be suggested: **45**.
+
+### 5.2 Hard rules (`feasible`)
+2–4 members; women-only students only with women; every pair scores ≥ 35 with at least
+one good day; at least one weekday when everyone arrives within 20 minutes of the first
+member; a way of travelling everyone accepts (and, for “Classmate drives”, a member with a
+car and enough seats); no previously declined pair.
+
+### 5.3 Find my circle (`algorithms.py::build_for`, `options_for`)
+Start from the student; repeatedly add the classmate who maximises
+`0.6 × (weakest pair score in the circle) + 0.4 × (fit with the student)` while the circle
+stays feasible, up to 4. Options: the best circle overall, plus circles seeded with each of
+the student's six best matches; duplicates removed; ranked by `fit + 6 × size`; top three.
+Accepting re-checks everything, because classmates may have been matched meanwhile.
+
+### 5.4 Algorithms compared (research)
+| Algorithm | Idea |
+|---|---|
+| **Greedy** (baseline) | In sign-up order, each student takes the nearest classmates that keep the circle feasible |
+| **k-means** | Cluster by location (k = ⌈n/4⌉), then form circles inside each cluster |
+| **Compatibility** (proposed) | The Find my circle method applied to everyone, hardest-to-place students first, then a repair pass |
+
+All share the same rules and are deterministic for a given seed.
+
+### 5.5 Results (synthetic data)
+`python -m app.benchmark`: 5 synthetic pools per size, mean ± SD
+(`docs/benchmark-synthetic.csv`).
+
+| Pool | Algorithm | Matched | Avg fit | Avg detour km | Saved Rs/week | ms |
 |---|---|---|---|---|---|---|
-| 60 | Greedy | 64.3% ± 5.5 | 0.680 ± 0.034 | 3.16 ± 0.67 | 24,928 ± 7,438 | 5 |
-| 60 | k-means | 43.7% ± 5.7 | **0.745** ± 0.051 | **2.56** ± 0.81 | 17,231 ± 6,007 | 10 |
-| 60 | Compatibility | **64.7%** ± 5.2 | 0.668 ± 0.032 | 3.37 ± 0.42 | **24,973** ± 5,566 | 15 |
-| 200 | Greedy | **82.2%** ± 2.5 | 0.722 ± 0.015 | 3.33 ± 0.09 | 128,083 ± 12,043 | 33 |
-| 200 | k-means | 73.6% ± 4.4 | **0.771** ± 0.022 | **2.01** ± 0.28 | 123,884 ± 14,466 | 264 |
-| 200 | Compatibility | 77.6% ± 2.9 | 0.727 ± 0.030 | 3.23 ± 0.09 | **131,293** ± 18,214 | 147 |
+| 70 | Greedy | 91.1 % ± 1.9 | 69.4 ± 0.8 | 7.09 ± 1.17 | 35,255 ± 6,674 | 28 |
+| 70 | k-means | 70.3 % ± 7.4 | **79.6** ± 4.1 | **4.31** ± 1.18 | 33,333 ± 6,967 | 45 |
+| 70 | Compatibility | **93.7 %** ± 4.6 | 72.5 ± 3.3 | 4.53 ± 0.86 | **37,847** ± 8,535 | 84 |
+| 200 | Greedy | 96.7 % ± 1.0 | 75.1 ± 2.6 | 5.97 ± 1.17 | 123,004 ± 12,131 | 99 |
+| 200 | k-means | 90.9 % ± 3.6 | **84.1** ± 1.0 | **3.15** ± 0.74 | **137,476** ± 19,657 | 448 |
+| 200 | Compatibility | **98.3 %** ± 0.6 | 78.6 ± 1.8 | 3.34 ± 0.59 | 135,863 ± 14,603 | 701 |
 
-**Interpretation.**
-* The proposed compatibility method **does not yet beat the greedy baseline** on match
-  rate. At 60 students the difference (64.7% vs 64.3%) is well inside one standard
-  deviation. At 200 students greedy is ahead by about 4.6 points (82.2% vs 77.6%).
-* k-means produces the tightest, most compatible circles with the shortest detours,
-  but leaves the most students unmatched, because it groups by geography before
-  looking at timetables.
-* There is a clear trade-off between *coverage* (match rate) and *quality*
-  (compatibility, detour). No method wins on both.
-* These are synthetic pools. The final evaluation must be re-run on the real,
-  consented student data via the research export (Section 9a).
+On the prototype's own 66 approved students: Compatibility 90.9 %, Greedy 89.4 %, k-means 84.8 % matched.
 
-**Next steps for the research component:** a local-search improvement pass for the
-compatibility method (move or swap students between circles while the objective
-improves); an exact integer-programming solution on small pools as an upper bound;
-and a significance test (paired, across datasets) before claiming any method is better.
+**Interpretation.** The proposed method matches the most students and keeps detours close
+to k-means; greedy's detours are about twice as long. k-means builds the tightest circles
+but leaves the most students out. At 70 students the match-rate gap to greedy is within
+one standard deviation, so it is not a clear win at that size; at 200 it is small but
+consistent. Savings are within noise of each other. These are synthetic pools: the final
+evaluation must be repeated on the consented real data (Matching lab → Research export),
+with a paired significance test.
 
-## 6. Driving rota (`services/rota.py`)
-For each shared day in the next 14 days, the rota picks the available driver with the
-fewest turns so far in that circle, breaking ties by who drove least recently. Past
-turns count, so the balance holds across weeks. A driver can mark a day "can't drive",
-which reassigns it; if no driver is free, the day shows "No driver: arrange together".
+## 6. Trips, money and the rota
 
-## 7. Cost model (`services/costs.py`)
-Trip km = (driver's distance to campus + detour) × 1.3 road factor. The trip cost is
-split equally between members. Monthly cost = per-trip share × shared days × 2 × 4.33.
-Each member is compared with driving their own route alone. Fuel price and
-efficiency are configurable; **update `CC_FUEL_PRICE_PKR` to the current OGRA price.**
+* **Travel days**: weekdays when at least two members arrive within 20 minutes of that
+  day's first member. A trip is created when a member first opens Today.
+* **Check-in**: one member's “Yes” marks every planned member as travelled; anyone can
+  correct their own record; “Didn't go” before confirmation marks only yourself.
+* **Fare**: the confirmer may enter their share (suggestions from the median of fares in
+  their area for that way of travelling); total = share × travellers, recorded against the
+  payer. Ride-hailing and rickshaw are a fare split; “Classmate drives” shares fuel; family
+  driver and parent drop cost nothing.
+* **Balances**: each traveller owes total ÷ travellers, and the payer is owed the total;
+  settlements and “Everyone settled up” reset the balance. Settle-up lines pair the
+  largest debtor with the largest creditor.
+* **Savings**: your share vs travelling alone the same way (road km = straight line × 1.35;
+  ride-hailing Rs 52/km, rickshaw Rs 38/km, fuel Rs 352.59 ÷ 12 km/L).
+* **Rota** (driving modes only): next two weeks; each day goes to the eligible member
+  with the fewest turns so far (ties: who went least recently), skipping days they can't
+  do; manual swaps are kept.
+* **One-day seats**: other active circles travelling today that are compatible with you
+  (women-only respected), have a free seat, are ≤ 8 km away or on your way, and arrive
+  within 30 minutes. The host circle accepts or declines.
+* **Reliability and badges**: shows-up % = travelled ÷ (travelled + didn't turn up).
+  “Didn't turn up” feedback marks that member's latest confirmed trip as a no-show.
+  Badges: a positive tag given twice (after 5+ trips), or “Reliable” at ≥ 95 %.
 
-## 8. API summary
-Interactive OpenAPI docs: `http://localhost:8000/docs`.
+## 7. API summary
 
-| Method | Path | Who | Purpose |
-|---|---|---|---|
-| POST | /api/auth/register, /api/auth/login | public | Account, JWT |
-| GET/PATCH | /api/auth/me | user | Account details |
-| GET | /api/meta | public | Areas, days, campus, report reasons |
-| GET/PUT | /api/profile | student | Commute profile |
-| GET | /api/circles/mine, /api/circles/{id} | member | Circle, rota, costs |
-| POST | /api/circles/{id}/respond, /leave, /unavailable | member | Lifecycle actions |
-| POST | /api/reports | member | Report a circle-mate |
-| GET | /api/admin/stats, /runs, /circles, /reports, /users | admin | Monitoring |
-| POST | /api/admin/compare | admin | Dry-run all algorithms |
-| POST | /api/admin/match | admin | Create circles |
-| POST | /api/admin/circles/{id}/dissolve | admin | Dissolve |
-| PATCH | /api/admin/reports/{id}, /api/admin/users/{id} | admin | Resolve report, suspend |
+Interactive docs at `/docs` in development (hidden in production).
 
-## 9a. Personal data, consent and research use
-
-Real student data is collected, so the system implements:
-
-| Requirement | Implementation |
+| Area | Endpoints |
 |---|---|
-| Informed consent | Registration requires agreeing to the privacy notice (`/privacy`); time and notice version are stored |
-| Separate research consent | Optional checkbox at sign-up, changeable any time on the Account page |
-| Data minimisation | Area instead of address; no GPS; landmark and phone optional |
-| Right of access | Account > *Download my data* (`GET /api/auth/me/export`, JSON) |
-| Right to erasure | Account > *Delete my account* (password confirmed): leaves the circle, deletes all personal records; safety reports are kept but unlinked |
-| Pseudonymised research data | `GET /api/admin/research-export` (CSV): **only** students who opted in; no name, email, phone or landmark; IDs are HMAC-SHA256 hashes keyed by the server secret |
+| Auth | `POST /api/auth/register`, `/login`; `GET/PATCH/DELETE /api/auth/me`; `GET /api/auth/me/export` |
+| Find | `GET/PUT /api/trip`; `GET /api/find/options`; `POST /api/find/accept` |
+| My circle | `GET /api/circle`; `POST /api/circle/respond`, `/leave`, `/feedback`, `/report`, `/rota/take`, `/rota/cant`; `PATCH /api/circle/mode` |
+| Today | `GET /api/today`; `POST /api/today/yes`, `/no`, `/correct`, `/fare`; `POST /api/tomorrow` |
+| Seats | `GET/POST /api/seats`; `POST /api/seats/{id}/answer`, `/cancel` |
+| Money, savings | `GET /api/money`; `POST /api/money/settle`, `/settle-all`; `GET /api/savings` |
+| Student Affairs | `GET /api/admin/usage`, `/fares`, `/health`, `/approvals`, `/reports`, `/users`, `/circles`, `/runs`, `/research-export`; `POST /api/admin/approvals/{id}`, `/compare`, `/match`, `/circles/{id}/dissolve`; `PATCH /api/admin/reports/{id}`, `/users/{id}` |
 
-## 9. Security
-* Passwords hashed with bcrypt; JWT (HS256) bearer tokens expire after 12 hours.
-* Registration can be restricted to campus email domains (`CC_EMAIL_DOMAINS`).
-* Login throttling: 5 failed attempts per email in 15 minutes returns HTTP 429.
-* Authorisation: non-members get **404** for circles (existence is not leaked); students
-  can only report people they have shared a circle with; admin routes check the role.
-* All input is validated with Pydantic: times, day names, areas, seats, and phone format.
-* Suspending a user signs them out and removes them from their circle immediately.
-* Security headers on every response: `X-Content-Type-Options`, `X-Frame-Options: DENY`,
-  `Referrer-Policy`, and HSTS in production. The container runs as a non-root user.
-* Admin accounts are created with `python -m app.create_admin` (password ≥ 12 characters),
-  never through the public sign-up.
+## 8. Security and personal data
 
-## 10. Fixes to the original prototype
-| Prototype issue | Resolution | Regression test |
-|---|---|---|
-| Re-running matching overwrote profiles and circles | Matching only reads profiles and only considers unmatched, seeking students | `test_rematching_does_not_touch_profiles_or_circles` |
-| Rota always assigned the first driver | Fair rotation using turn history | `test_rota_is_fair_between_drivers` |
-| Inconsistent phone formats | Normalised to +923XXXXXXXXX | `test_phone_normalised` |
+* bcrypt passwords; JWT bearer tokens (12 h); 5 failed logins per email in 15 min → 429.
+* Only `@bic.edu.pk` addresses can register, and every account waits for Student Affairs approval.
+* Consent to the Terms, Privacy Notice and Code of Conduct is required and logged with
+  its version; research consent is separate, optional and reversible.
+* Students can download all their data and delete their account (password confirmed);
+  safety reports survive deletion without identifying the person.
+* The research export contains opted-in students only, with keyed-hash IDs and no names,
+  emails or phone numbers.
+* Non-members cannot see a circle; feedback and reports only about your own circle;
+  suspension signs the student out and removes them from their circle.
+* Security headers on every response (HSTS in production); the container runs as non-root.
 
-## 11. Testing
-`backend/tests/` holds 54 automated tests. They run on **both SQLite and PostgreSQL 16**
-(GitHub Actions runs both on every push):
-* **Matching engine (34):** every algorithm is checked over 5 random pools of 50
-  students. No circle may break a hard constraint, no student may appear twice, and
-  every student must be accounted for. The tests also cover determinism and edge
-  cases (empty pool, lone driver).
-* **API journeys (13):** registration validation, throttling, the full accept flow,
-  decline handling, a driver leaving, privacy, rota fairness, reassignment when a
-  driver is unavailable, suspension, reports, and the dry-run compare.
-* **Personal data (7):** consent is required, the research toggle, data export,
-  account deletion (circle survives, report is unlinked), the research CSV
-  (opted-in students only, no identifiers), database URL handling, and production
-  configuration guards.
+## 9. Testing
 
-Two browser walkthroughs ran in Chromium with no console errors: (1) the admin
-compares algorithms and runs matching, then every member accepts; (2) on the
-production configuration with PostgreSQL, a student signs up with consent, sets up a
-Korangi Creek profile, downloads their data, the admin downloads the research CSV, and
-the student deletes their account. Screenshots are in `docs/screenshots/`.
+`backend/tests/` holds **54 automated tests**, run on both SQLite and PostgreSQL 16 by
+GitHub Actions on every push.
 
-## 12. Known limitations and next steps (to the final build)
-* Distances use straight-line distance between area centroids. Next step: a road-distance
-  API (e.g. OSRM) and finer pickup zones.
-* The login throttle is held in memory per process; use Redis for multi-worker deploys.
-* No email verification or notifications yet. Next steps: an email OTP at registration,
-  then email or WhatsApp alerts when a circle is proposed.
-* No database migrations yet. Add Alembic before the schema changes in production.
-* The proposed algorithm needs the improvements listed in Section 5.5.
-* The Docker image could not be built in the development sandbox (Docker Hub rate
-  limit). It builds on Render and GitHub Actions; check the first deploy log.
+* **Matching (25):** fit score parts, women-only, detour, timetable window, travel modes,
+  feasibility, options; every algorithm over random pools never breaks a rule, never places
+  a student twice, and is deterministic; the prototype's students are mostly matched.
+* **Student journeys (17):** sign-up validation, approval gate, trip questions, options and
+  acceptance, availability re-check, decline memory, women-only, check-in and correction,
+  fare entry and balances, not going tomorrow, weekends, fair and swappable rota, travel
+  mode and leaving, feedback, badges and no-shows, report and leave, one-day seats,
+  re-matching, savings.
+* **Student Affairs and safety (12):** admin-only access, approvals, usage/fares/health,
+  suspension from a report, matching lab, export and deletion, login throttle, admin
+  bootstrap, production guards, safe v1 migration, demo seeding.
+
+Browser checks (Playwright, Chromium): every screen rendered side by side with the
+prototype; a full journey (sign up → approval → find → classmates accept → check in →
+fare → money) with no console or server errors; no horizontal scrolling at phone width.
+
+## 10. Known limitations and next steps
+
+* Distances are straight lines between area centre points × 1.35; a road-routing API would be more accurate.
+* No email verification or notifications yet (Student Affairs approval covers identity for the pilot).
+* WhatsApp group creation is a preview only.
+* The login throttle is per process; use Redis if running several workers.
+* Fare suggestions need real entries; until then they fall back to an estimate.

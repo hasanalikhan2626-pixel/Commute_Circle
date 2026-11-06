@@ -27,7 +27,8 @@ The Python app does not use them; it only reads `CC_DATABASE_URL`.
 3. Render asks for two secret values:
    * `CC_DATABASE_URL`: the Neon string from step 2.
    * `CC_ADMIN_PASSWORD`: a new password (12+ characters) for the transport-office
-     account `transport@bic.edu.pk`, which the app creates on first start.
+     account `transport@bic.edu.pk`, which the app creates on first start
+     (Student Affairs signs in with it).
    `CC_SECRET_KEY` is generated for you.
 4. Click **Apply** and wait for the first deploy (about 5–10 minutes; the log ends with
    `Application startup complete`).
@@ -46,11 +47,23 @@ Render's free plan has no Shell. Where a shell is available, `python -m app.crea
 also creates or resets an admin. Never run `python -m app.seed` against production
 (it refuses when `CC_ENV=production`).
 
-## 5. Before the Week 25 demo
+## 5. Updating to version 2 (prototype redesign)
+Version 2 changes the database layout. Nothing needs doing by hand: on its first start,
+the app sees the old layout and, **because it holds no student accounts yet**, rebuilds
+the tables and keeps the admin login and password. The Render log shows
+`Replaced the v1 schema (no student data); kept 1 admin login(s)`.
+If the old layout ever held student accounts, the app would stop with an error instead of
+touching them. Later changes are applied automatically by Alembic migrations.
+
+## 6. Before the Week 25 demo
 * Free Render services **sleep after 15 minutes idle** and take about 50 seconds to wake.
   Open the site a few minutes before presenting.
-* For a demo with fake data, deploy a **second** service pointing at a **separate** Neon
-  database with `CC_ENV=development`, then seed that one. Never mix demo and real data.
+* For a demo with the prototype's 71 dummy students, create a **second** Render web
+  service from the same repo, pointing at a **separate** Neon database (Neon → New
+  branch or New project), with `CC_ENV=development`, `CC_SEED_DEMO=true` and its own
+  `CC_SECRET_KEY`. It fills the empty database with demo data on first start.
+  Demo logins: `admin@bic.edu.pk` / `admin12345`, students like
+  `ayesha.khan@bic.edu.pk` / `student123`. Never mix demo and real data.
 
 ## Backups
 Neon keeps 24 hours of point-in-time history on the free tier. For extra safety,
