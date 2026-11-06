@@ -11,7 +11,17 @@ _override: date | None = None  # tests can pin the date
 
 
 def today() -> date:
-    return _override or datetime.now(PKT).date()
+    """Today in Karachi. Outside production, CC_TODAY=YYYY-MM-DD pins the date (demos, tests)."""
+    if _override:
+        return _override
+    import os
+
+    from ..config import settings
+
+    pinned = os.environ.get("CC_TODAY")
+    if pinned and not settings.production:
+        return date.fromisoformat(pinned)
+    return datetime.now(PKT).date()
 
 
 def set_today(d: date | None) -> None:

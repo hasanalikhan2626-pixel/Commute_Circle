@@ -35,6 +35,9 @@ screens, wording, styles and matching method, and adds what a real service needs
 | Seat request accepted automatically | The host circle accepts or declines |
 | A circle could form with no travel method in common | A common way of travelling is required (and a car with enough seats for “Classmate drives”) |
 | WhatsApp group shown as “Created” | Shown as a preview (“Coming soon”): no group is actually created |
+| Detour only lowered the fit score | Proposal hard rule: no rider's detour over 12 minutes |
+| Circle fit averaged one direction per pair | Both directions, so a circle's score doesn't depend on listing order |
+| Auto-rickshaw circles of 4 | Rickshaw carries 3 passengers (proposal Appendix C) |
 
 ## 3. Architecture
 
@@ -65,6 +68,9 @@ frontend/src                            backend/app
   | `CC_FUEL_PRICE_PKR` | 352.59 | Used for “Classmate drives” fuel sharing |
   | `CC_ADMIN_EMAIL` / `CC_ADMIN_PASSWORD` | – | Creates the first admin on start-up (hosts with no shell) |
   | `CC_SEED_DEMO` | – | `true` loads the prototype's demo data into an *empty*, non-production database |
+  | `CC_AVG_SPEED_KMH` | 22 | Average speed used to turn detour km into minutes |
+  | `CC_MAX_DETOUR_MIN` | 12 | Hard limit on any rider's detour |
+  | `CC_TODAY` | – | Development only: pin “today” (YYYY-MM-DD), e.g. for a weekend demo |
 
   In production the app refuses to start with a weak secret, SQLite or no email domain;
   the API docs are hidden and the seed script refuses to run.
@@ -94,10 +100,10 @@ to start rather than risk data.
 first name, initial, programme and area. Phone numbers appear only once every member has
 accepted. Student Affairs screens show totals; names appear only for approvals and reports.
 
-## 5. Matching (ported from the prototype)
+## 5. Matching engine (prototype fit score + proposal optimisation methods)
 
 ### 5.1 Fit score (`matching/compat.py::pair_fit`)
-For student A looking at classmate B, 0–100:
+For student A looking at classmate B, 0–100 (ported from the prototype):
 
 | Part | Points | Rule |
 |---|---|---|
@@ -106,14 +112,27 @@ For student A looking at classmate B, 0–100:
 | Timetable | 30 | For each of A's days: arrival within 15 min = 1, within 30 = 0.5 (70 %); leaving time likewise (30 %) |
 | Travel | 10 | At least one way of travelling in common |
 
-“On your way” = detour ≤ 12 %. A circle's fit is the average over all its pairs:
-75+ “Great fit”, 60+ “Good fit”, otherwise “Fair fit”. Minimum to be suggested: **45**.
+“On your way” = detour ≤ 12 %. A circle's fit is the average over every pair **in both
+directions**, so it doesn't depend on who is listed first (the prototype averaged one
+direction per pair, which made the score order-dependent). 75+ “Great fit”, 60+ “Good fit”,
+otherwise “Fair fit”. Minimum to be suggested: **45**.
 
-### 5.2 Hard rules (`feasible`)
+For a whole pool, `Scorer` computes every pair's fit at once with NumPy (identical results
+to `pair_fit`, checked by a test on ~19,000 pairs), which keeps every algorithm under half a
+second on 500 students.
+
+### 5.2 Hard rules (`Scorer.feasible`, proposal §14.7 stage 1)
 2–4 members; women-only students only with women; every pair scores ≥ 35 with at least
-one good day; at least one weekday when everyone arrives within 20 minutes of the first
-member; a way of travelling everyone accepts (and, for “Classmate drives”, a member with a
-car and enough seats); no previously declined pair.
+one good day; at least one weekday when everyone arrives within 20 minutes of the circle's
+founder; a way of travelling everyone accepts that can carry the group (auto-rickshaw 3
+passengers, others 4; “Classmate drives” needs a car with enough seats); no previously
+declined pair; and **no rider's detour over 12 minutes** (proposal §13). A set of students is
+a valid circle if *any* of them can be its founder (`Scorer.arrange`).
+
+**Detour minutes** = extra road km a rider travels compared with going straight to campus
+(pickups furthest-first; road km = straight line × 1.35) ÷ an assumed average speed of
+22 km/h (`CC_AVG_SPEED_KMH`). This is an estimate until a routing API (OSRM / OpenRouteService)
+provides real travel times.
 
 ### 5.3 Find my circle (`algorithms.py::build_for`, `options_for`)
 Start from the student; repeatedly add the classmate who maximises
@@ -121,38 +140,66 @@ Start from the student; repeatedly add the classmate who maximises
 stays feasible, up to 4. Options: the best circle overall, plus circles seeded with each of
 the student's six best matches; duplicates removed; ranked by `fit + 6 × size`; top three.
 Accepting re-checks everything, because classmates may have been matched meanwhile.
+One search takes **0.04 s on average (worst 0.10 s) with 500 students**, against the
+proposal's ≤ 1.5 s target.
 
-### 5.4 Algorithms compared (research)
+### 5.4 Algorithms compared (RQ1)
 | Algorithm | Idea |
 |---|---|
 | **Greedy** (baseline) | In sign-up order, each student takes the nearest classmates that keep the circle feasible |
 | **k-means** | Cluster by location (k = ⌈n/4⌉), then form circles inside each cluster |
-| **Compatibility** (proposed) | The Find my circle method applied to everyone, hardest-to-place students first, then a repair pass |
+| **Compatibility** | The Find my circle method applied to everyone, hardest-to-place students first, then a repair pass |
+| **DBSCAN + Kuhn–Munkres** (proposal §14.6–14.7) | DBSCAN finds dense neighbourhood pods (radius 1.5 km, ≥ 3 students); in each pod, well-connected students anchor circles and riders are assigned to anchor seats with the Hungarian algorithm (`scipy.optimize.linear_sum_assignment`); a final pass forms circles “on the way” across pods |
+| **Genetic Algorithm** (proposal §14.7) | Grouping GA: individuals are sets of feasible circles; seeded with the Compatibility, Greedy and DBSCAN solutions; tournament selection, circle-preserving crossover, dissolve/swap/move mutations with repair, elitism; 24 × 40 generations |
+| **Exact optimum (MILP)** (RQ1) | Enumerates every feasible circle and solves the set-partitioning problem exactly (`scipy.optimize.milp`); up to ~90 students. Used to measure how close the heuristics get |
 
-All share the same rules and are deterministic for a given seed.
+All share the hard rules above and are deterministic for a given seed.
+
+**Objective** (`matching/optimise.py`), maximised by the Genetic Algorithm and the MILP and
+reported for every algorithm: per circle,
+`size × (100 + fit) − 60 − 2 × (total rider detour minutes)`. Matching a student is worth
+far more than any fit or detour difference, so coverage comes first; each vehicle costs 60,
+which favours fuller circles (RQ1: maximise occupancy); shorter detours break ties.
 
 ### 5.5 Results (synthetic data)
 `python -m app.benchmark`: 5 synthetic pools per size, mean ± SD
-(`docs/benchmark-synthetic.csv`).
+(`docs/benchmark-synthetic.csv`). Every rider in every algorithm is within the 12-minute limit.
 
-| Pool | Algorithm | Matched | Avg fit | Avg detour km | Saved Rs/week | ms |
-|---|---|---|---|---|---|---|
-| 70 | Greedy | 91.1 % ± 1.9 | 69.4 ± 0.8 | 7.09 ± 1.17 | 35,255 ± 6,674 | 28 |
-| 70 | k-means | 70.3 % ± 7.4 | **79.6** ± 4.1 | **4.31** ± 1.18 | 33,333 ± 6,967 | 45 |
-| 70 | Compatibility | **93.7 %** ± 4.6 | 72.5 ± 3.3 | 4.53 ± 0.86 | **37,847** ± 8,535 | 84 |
-| 200 | Greedy | 96.7 % ± 1.0 | 75.1 ± 2.6 | 5.97 ± 1.17 | 123,004 ± 12,131 | 99 |
-| 200 | k-means | 90.9 % ± 3.6 | **84.1** ± 1.0 | **3.15** ± 0.74 | **137,476** ± 19,657 | 448 |
-| 200 | Compatibility | **98.3 %** ± 0.6 | 78.6 ± 1.8 | 3.34 ± 0.59 | 135,863 ± 14,603 | 701 |
+| Pool | Algorithm | Matched | Avg fit | Rider detour (min) | Occupancy | Gap to optimum | Time (s) |
+|---|---|---|---|---|---|---|---|
+| 70 | Greedy | 84.0 % ± 3.8 | 80.3 | 2.3 | 74 % | 12.1 % | 0.02 |
+| 70 | k-means | 64.9 % ± 7.1 | **87.5** | 1.8 | **78 %** | 28.8 % | 0.01 |
+| 70 | Compatibility | 88.0 % ± 3.4 | 78.4 | 2.2 | 70 % | 9.4 % | 0.01 |
+| 70 | DBSCAN + Kuhn–Munkres | 85.4 % ± 3.8 | 85.3 | **1.3** | 61 % | 9.2 % | 0.04 |
+| 70 | Genetic Algorithm | **92.3 %** ± 3.3 | 82.1 | 1.7 | 67 % | **2.9 %** | 0.34 |
+| 70 | *Exact optimum* | *94.3 % ± 1.4* | *84.3* | *1.3* | *62 %* | *0* | *0.38* |
+| 200 | Greedy | 92.2 % ± 1.5 | 83.1 | 2.0 | **86 %** | – | 0.03 |
+| 200 | k-means | 85.1 % ± 3.5 | 90.4 | 1.2 | 82 % | – | 0.05 |
+| 200 | Compatibility | 96.2 % ± 1.5 | 82.9 | 1.9 | 85 % | – | 0.07 |
+| 200 | DBSCAN + Kuhn–Munkres | 95.4 % ± 1.6 | **91.4** | **0.8** | 63 % | – | 0.05 |
+| 200 | Genetic Algorithm | **97.4 %** ± 1.0 | 89.2 | 1.1 | 78 % | – | 1.35 |
+| 500 | Greedy | 95.7 % ± 0.9 | 87.2 | 1.4 | 92 % | – | 0.18 |
+| 500 | k-means | 92.6 % ± 1.5 | 93.2 | 0.6 | 89 % | – | 0.30 |
+| 500 | Compatibility | 98.3 % ± 0.5 | 87.7 | 1.4 | **94 %** | – | 0.37 |
+| 500 | DBSCAN + Kuhn–Munkres | 98.3 % ± 0.5 | **94.8** | **0.4** | 66 % | – | 0.17 |
+| 500 | Genetic Algorithm | **99.0 %** ± 0.5 | 92.4 | 0.7 | 83 % | – | 4.54 |
 
-On the prototype's own 66 approved students: Compatibility 90.9 %, Greedy 89.4 %, k-means 84.8 % matched.
+On the prototype's own 66 approved students: exact optimum 95.5 % matched, Genetic Algorithm
+and DBSCAN + Kuhn–Munkres 93.9 %, Greedy 86.4 %, Compatibility 84.9 %, k-means 80.3 %.
 
-**Interpretation.** The proposed method matches the most students and keeps detours close
-to k-means; greedy's detours are about twice as long. k-means builds the tightest circles
-but leaves the most students out. At 70 students the match-rate gap to greedy is within
-one standard deviation, so it is not a clear win at that size; at 200 it is small but
-consistent. Savings are within noise of each other. These are synthetic pools: the final
-evaluation must be repeated on the consented real data (Matching lab → Research export),
-with a paired significance test.
+**Interpretation (RQ1).**
+* The Genetic Algorithm matches the most students at every size and comes within about 3 %
+  of the exact optimum on 70-student pools, against 9–29 % for the other methods.
+* DBSCAN + Kuhn–Munkres gives the most compatible circles and the shortest detours, but
+  uses many 2–3 person circles (occupancy about 62–66 %): it trades occupancy for comfort.
+* Greedy and Compatibility fill vehicles best but leave more students unmatched on small
+  pools and detour riders more.
+* All methods meet the proposal's targets on synthetic data: ≥ 75 % matched (except k-means
+  on 70 students), every rider ≤ 12 minutes, one student's search ≤ 1.5 s. The whole-cohort
+  Genetic Algorithm takes about 4.5 s for 500 students, acceptable for an occasional batch run.
+* These are synthetic pools and estimated minutes. The final evaluation must be repeated on
+  the consented pilot data (Matching lab → Research export), with OSRM travel times and a
+  paired significance test across datasets.
 
 ## 6. Trips, money and the rota
 
@@ -209,12 +256,15 @@ Interactive docs at `/docs` in development (hidden in production).
 
 ## 9. Testing
 
-`backend/tests/` holds **54 automated tests**, run on both SQLite and PostgreSQL 16 by
+`backend/tests/` holds **74 automated tests**, run on both SQLite and PostgreSQL 16 by
 GitHub Actions on every push.
 
-* **Matching (25):** fit score parts, women-only, detour, timetable window, travel modes,
-  feasibility, options; every algorithm over random pools never breaks a rule, never places
-  a student twice, and is deterministic; the prototype's students are mostly matched.
+* **Matching (45):** fit score parts, women-only, detour, timetable window, travel modes and
+  capacities, feasibility, options; the NumPy score table equals `pair_fit` on every pair;
+  DBSCAN, the 12-minute detour rule, founder order; every algorithm (including DBSCAN +
+  Kuhn–Munkres and the Genetic Algorithm) over random pools never breaks a rule, never places
+  a student twice, and is deterministic; the exact optimum is never beaten and the Genetic
+  Algorithm never does worse than its seeds; the prototype's students are mostly matched.
 * **Student journeys (17):** sign-up validation, approval gate, trip questions, options and
   acceptance, availability re-check, decline memory, women-only, check-in and correction,
   fare entry and balances, not going tomorrow, weekends, fair and swappable rota, travel
@@ -230,7 +280,7 @@ fare → money) with no console or server errors; no horizontal scrolling at pho
 
 ## 10. Known limitations and next steps
 
-* Distances are straight lines between area centre points × 1.35; a road-routing API would be more accurate.
+* Distances are straight lines between area centre points × 1.35 and minutes assume 22 km/h; a routing API (OSRM / OpenRouteService) would give real travel times.
 * No email verification or notifications yet (Student Affairs approval covers identity for the pilot).
 * WhatsApp group creation is a preview only.
 * The login throttle is per process; use Redis if running several workers.

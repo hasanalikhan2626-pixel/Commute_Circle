@@ -23,7 +23,8 @@ def to_candidate(p: Profile) -> Candidate:
 def rules_for(db: Session) -> Rules:
     excluded = frozenset(frozenset((a, b)) for a, b in db.execute(select(DeclinedPair.user_id, DeclinedPair.other_id)))
     return Rules(campus=(settings.campus_lat, settings.campus_lng), window_min=settings.schedule_window_min,
-                 max_circle_size=settings.max_circle_size, excluded=excluded)
+                 max_circle_size=settings.max_circle_size, excluded=excluded, max_detour_min=settings.max_detour_min,
+                 speed_kmh=settings.avg_speed_kmh, road_factor=settings.road_factor)
 
 
 def live_circles_of(db: Session, user_id: int) -> list[Circle]:

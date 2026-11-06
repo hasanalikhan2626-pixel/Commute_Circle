@@ -15,6 +15,8 @@ Hard rules for a circle:
   * a way of travelling everyone accepts; "Classmate drives" also needs a member
     with a car and enough seats
   * no pair that a student previously declined
+  * no rider's estimated detour exceeds ``max_detour_min`` (12 minutes, proposal
+    section 13): extra road km / assumed average speed
 """
 from __future__ import annotations
 
@@ -27,6 +29,9 @@ from .types import Candidate
 DAYS = ("Mon", "Tue", "Wed", "Thu", "Fri")
 METHODS = ("Shared ride-hailing", "Classmate drives", "Family driver", "Parent drop", "Rickshaw")
 DRIVE_MODES = ("Classmate drives", "Family driver", "Parent drop")  # these get a rota
+# Passengers each way of travelling can carry (proposal Appendix C). "Classmate drives"
+# depends on the driver's seats and is checked separately.
+MODE_CAPACITY = {"Shared ride-hailing": 4, "Family driver": 4, "Parent drop": 4, "Rickshaw": 3}
 MIN_FIT = 45
 
 
@@ -47,6 +52,10 @@ class Rules:
     pair_min: int = MIN_FIT - 10
     max_circle_size: int = 4
     excluded: frozenset = field(default_factory=frozenset)
+    # Proposal hard rule: no rider's estimated detour may exceed this (None = off).
+    max_detour_min: float | None = 12.0
+    speed_kmh: float = 22.0
+    road_factor: float = 1.35
 
 
 @dataclass(frozen=True)
@@ -116,32 +125,201 @@ def travel_modes(group: list[Candidate]) -> list[str]:
             continue
         if m == "Classmate drives" and not any(s.has_car and s.seats >= len(group) - 1 for s in group):
             continue
+        if len(group) > MODE_CAPACITY.get(m, 99):
+            continue
         out.append(m)
     return out
 
 
-def pair_ok(a: Candidate, b: Candidate, rules: Rules) -> bool:
-    if frozenset((a.user_id, b.user_id)) in rules.excluded:
-        return False
-    for x, y in ((a, b), (b, a)):
-        p = pair_fit(x, y, rules.campus)
-        if p is None or p.total < rules.pair_min or not p.good_days:
+class Scorer:
+    """Pair scores for one matching run.
+
+    With ``pool`` given, every pair's fit is computed at once with NumPy (the same
+    formula as ``pair_fit``), so scoring 500 students takes milliseconds instead of
+    seconds. Students outside the pool fall back to ``pair_fit`` and are memoised.
+    """
+
+    def __init__(self, rules: Rules, pool: list[Candidate] | None = None):
+        self.rules = rules
+        self._fit: dict[tuple[int, int], PairFit | None] = {}
+        self._ok: dict[tuple[int, int], bool] = {}
+        self._arr: dict[int, dict[str, int]] = {}
+        self.idx: dict[int, int] = {}
+        if pool:
+            self._prepare(pool)
+
+    # -- vectorised pool table ------------------------------------------------
+    def _prepare(self, pool: list[Candidate]) -> None:
+        import numpy as np
+
+        n = len(pool)
+        self.idx = {c.user_id: i for i, c in enumerate(pool)}
+        lat = np.radians([c.location[0] for c in pool])
+        lng = np.radians([c.location[1] for c in pool])
+        clat, clng = np.radians(self.rules.campus[0]), np.radians(self.rules.campus[1])
+
+        def hav(la1, lo1, la2, lo2):
+            h = np.sin((la2 - la1) / 2) ** 2 + np.cos(la1) * np.cos(la2) * np.sin((lo2 - lo1) / 2) ** 2
+            return 2 * 6371.0 * np.arcsin(np.sqrt(h))
+
+        d = hav(lat[:, None], lng[:, None], lat[None, :], lng[None, :])
+        to_c = hav(lat, lng, clat, clng)
+        ac, bc = to_c[:, None], to_c[None, :]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            via_b = np.where(ac > 0, (d + bc) / ac - 1, np.inf)
+            via_a = np.where(bc > 0, (d + ac) / bc - 1, np.inf)
+        det = np.maximum(0.0, np.minimum(via_b, via_a))
+        route = np.maximum(0.0, 40 * (1 - det / 0.35))
+        near = np.minimum(20.0, np.maximum(0.0, 20 * (1 - (d - 1.5) / 6.5)))
+
+        on = np.zeros((n, len(DAYS)), bool)
+        tin = np.zeros((n, len(DAYS)))
+        tout = np.zeros((n, len(DAYS)))
+        for i, c in enumerate(pool):
+            for k, day in enumerate(DAYS):
+                if day in c.schedule:
+                    on[i, k] = True
+                    tin[i, k] = minutes(c.schedule[day]["in"])
+                    tout[i, k] = minutes(c.schedule[day]["out"])
+
+        def slot(v):
+            return np.where(v <= 15, 1.0, np.where(v <= 30, 0.5, 0.0))
+
+        both = on[:, None, :] & on[None, :, :]
+        ok = np.where(both, slot(np.abs(tin[:, None, :] - tin[None, :, :])) * 0.7
+                      + slot(np.abs(tout[:, None, :] - tout[None, :, :])) * 0.3, 0.0)
+        ndays = on.sum(axis=1)
+        ssum = np.zeros((n, n))
+        for k in range(len(DAYS)):  # sum in day order, as pair_fit does
+            ssum = ssum + np.where(on[:, None, k], ok[:, :, k], 0.0)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            sched = np.where(ndays[:, None] > 0, 30 * ssum / ndays[:, None], 0.0)
+        good = ((ok >= 0.7) & on[:, None, :]).any(axis=2)
+
+        bit = {m: 1 << i for i, m in enumerate(METHODS)}
+        mask = np.array([sum(bit[m] for m in c.methods if m in bit) for c in pool])
+        pref = np.where((mask[:, None] & mask[None, :]) != 0, 10.0, 0.0)
+
+        fem = np.array([c.gender == "female" for c in pool])
+        wo = np.array([c.women_only for c in pool])
+        allowed_m = ~((wo[:, None] & ~fem[None, :]) | (wo[None, :] & ~fem[:, None]))
+        total = np.round(route + near + sched + pref)
+        total = np.where(allowed_m, total, 0).astype(int)
+        r = self.rules
+        okm = allowed_m & good & good.T & (total >= r.pair_min) & (total.T >= r.pair_min)
+        np.fill_diagonal(okm, False)
+        for pair in r.excluded:
+            ids = [self.idx.get(u) for u in pair]
+            if len(ids) == 2 and None not in ids:
+                okm[ids[0], ids[1]] = okm[ids[1], ids[0]] = False
+        self.T, self.G, self.OK, self.D = total, good & allowed_m, okm, d
+        for c in pool:
+            self._arrivals(c)
+
+    def _both(self, a: Candidate, b: Candidate):
+        i, j = self.idx.get(a.user_id), self.idx.get(b.user_id)
+        return (i, j) if i is not None and j is not None else None
+
+    # -- queries ----------------------------------------------------------------
+    def fit(self, a: Candidate, b: Candidate) -> PairFit | None:
+        k = (a.user_id, b.user_id)
+        if k not in self._fit:
+            self._fit[k] = pair_fit(a, b, self.rules.campus)
+        return self._fit[k]
+
+    def total(self, a: Candidate, b: Candidate) -> int:
+        ij = self._both(a, b)
+        if ij:
+            return int(self.T[ij])
+        p = self.fit(a, b)
+        return p.total if p else 0
+
+    def candidate(self, a: Candidate, b: Candidate) -> bool:
+        """b can be suggested to a: allowed, fit >= min_fit, and a good day in common."""
+        if a.user_id == b.user_id or frozenset((a.user_id, b.user_id)) in self.rules.excluded:
             return False
-    return True
+        ij = self._both(a, b)
+        if ij:
+            return bool(self.G[ij]) and self.T[ij] >= self.rules.min_fit
+        p = self.fit(a, b)
+        return bool(p and p.total >= self.rules.min_fit and p.good_days)
+
+    def ok(self, a: Candidate, b: Candidate) -> bool:
+        ij = self._both(a, b)
+        if ij:
+            return bool(self.OK[ij])
+        k = (a.user_id, b.user_id) if a.user_id < b.user_id else (b.user_id, a.user_id)
+        if k not in self._ok:
+            r = self.rules
+            good = frozenset(k) not in r.excluded
+            for x, y in ((a, b), (b, a)):
+                if not good:
+                    break
+                p = self.fit(x, y)
+                good = p is not None and p.total >= r.pair_min and bool(p.good_days)
+            self._ok[k] = good
+        return self._ok[k]
+
+    def _arrivals(self, c: Candidate) -> dict[str, int]:
+        if c.user_id not in self._arr:
+            self._arr[c.user_id] = {d: minutes(c.schedule[d]["in"]) for d in DAYS if d in c.schedule}
+        return self._arr[c.user_id]
+
+    def group_days(self, group: list[Candidate]) -> list[str]:
+        arr = [self._arrivals(c) for c in group]
+        ref, w = arr[0], self.rules.window_min
+        return [d for d in DAYS if all(d in a for a in arr) and all(abs(a[d] - ref[d]) <= w for a in arr)]
+
+    def feasible(self, group: list[Candidate]) -> bool:
+        r = self.rules
+        if not 2 <= len(group) <= r.max_circle_size:
+            return False
+        if not all(self.ok(a, b) for a, b in combinations(group, 2)):
+            return False
+        if not (self.group_days(group) and travel_modes(group)):
+            return False
+        return self.detour_ok(group)
+
+    def arrange(self, group: list[Candidate]) -> list[Candidate] | None:
+        """The group with a valid founder first, or None if no member can found it.
+
+        The timetable window is measured from the circle's first member (prototype rule),
+        so feasibility can depend on who is first; a set of students is a valid circle if
+        any of them can be its founder.
+        """
+        if self.feasible(group):
+            return list(group)
+        for i in range(1, len(group)):
+            g = [group[i]] + group[:i] + group[i + 1:]
+            if self.feasible(g):
+                return g
+        return None
+
+    def rider_detour_min(self, group: list[Candidate]) -> dict[int, float]:
+        r = self.rules
+        return {u: km / r.speed_kmh * 60 for u, km in rider_detours_km(group, r.campus, r.road_factor).items()}
+
+    def detour_ok(self, group: list[Candidate]) -> bool:
+        lim = self.rules.max_detour_min
+        return lim is None or max(self.rider_detour_min(group).values()) <= lim
+
+    def circle_fit(self, group: list[Candidate]) -> int:
+        """Average fit over every pair, in both directions (so it doesn't depend on who is
+        listed first; the prototype averaged one direction per pair)."""
+        scores = [self.total(a, b) + self.total(b, a) for a, b in combinations(group, 2)]
+        return round(sum(scores) / (2 * len(scores))) if scores else 0
+
+
+def pair_ok(a: Candidate, b: Candidate, rules: Rules) -> bool:
+    return Scorer(rules).ok(a, b)
 
 
 def feasible(group: list[Candidate], rules: Rules) -> bool:
-    if not 2 <= len(group) <= rules.max_circle_size:
-        return False
-    if not all(pair_ok(a, b, rules) for a, b in combinations(group, 2)):
-        return False
-    return bool(group_days(group, rules.window_min)) and bool(travel_modes(group))
+    return Scorer(rules).feasible(group)
 
 
 def circle_fit(group: list[Candidate], campus: tuple[float, float]) -> int:
-    scores = [(pair_fit(a, b, campus) or PairFit(0, 0, 0, 0, 0, 0, 0, (), (), False)).total
-              for a, b in combinations(group, 2)]
-    return round(sum(scores) / len(scores)) if scores else 0
+    return Scorer(Rules(campus=campus)).circle_fit(group)
 
 
 def fit_label(v: int) -> str:
@@ -151,3 +329,25 @@ def fit_label(v: int) -> str:
 def route_info(group: list[Candidate], campus: tuple[float, float], road_factor: float) -> dict:
     order, km = pickup_route_km([s.location for s in group], campus)
     return {"order": [group[i].user_id for i in order], "road_km": km * road_factor}
+
+
+def rider_detours_km(group: list[Candidate], campus: tuple[float, float], road_factor: float) -> dict[int, float]:
+    """Extra road km each member rides compared with going straight to campus.
+
+    Pickups run furthest-first (prototype rule), so the first person picked up rides
+    past everyone else's pickup; the last rides almost directly.
+    """
+    order, _ = pickup_route_km([s.location for s in group], campus)
+    seq = [group[i] for i in order]
+    out = {}
+    for k, s in enumerate(seq):
+        ride = sum(haversine_km(seq[j].location, seq[j + 1].location) for j in range(k, len(seq) - 1))
+        ride += haversine_km(seq[-1].location, campus)
+        out[s.user_id] = max(0.0, ride - haversine_km(s.location, campus)) * road_factor
+    return out
+
+
+def capacity(mode: str, group: list[Candidate]) -> int:
+    if mode == "Classmate drives":
+        return max((s.seats + 1 for s in group if s.has_car), default=len(group))
+    return MODE_CAPACITY.get(mode, 4)

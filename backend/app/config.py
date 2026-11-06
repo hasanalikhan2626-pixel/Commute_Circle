@@ -44,6 +44,10 @@ class Settings:
     fuel_km_per_litre: float = field(default_factory=lambda: float(_env("FUEL_KM_PER_LITRE", "12")))
     # Road distance is longer than straight-line distance (prototype: x1.35).
     road_factor: float = field(default_factory=lambda: float(_env("ROAD_FACTOR", "1.35")))
+    # Average door-to-campus speed used to turn detour km into minutes (assumption until
+    # a routing API gives real times).
+    avg_speed_kmh: float = field(default_factory=lambda: float(_env("AVG_SPEED_KMH", "22")))
+    max_detour_min: float = field(default_factory=lambda: float(_env("MAX_DETOUR_MIN", "12")))
     co2_kg_per_litre: float = 2.31  # petrol combustion, IPCC default
     max_circle_size: int = 4
     schedule_window_min: int = 20  # everyone arrives within this many minutes of the circle's first member

@@ -118,3 +118,86 @@ def test_prototype_students_mostly_matched():
     pool = prototype_pool()
     res = ALGORITHMS["compatibility"](pool, RULES, 0)
     assert sum(len(c.member_ids) for c in res.circles) / len(pool) > 0.8
+
+
+def test_vectorised_scores_match_pair_fit():
+    from app.matching.compat import Scorer, pair_ok
+
+    for seed in range(3):
+        pool = pool_from(make_students(80, 50 + seed))
+        sc = Scorer(RULES, pool)
+        for a in pool:
+            for b in pool:
+                if a is b:
+                    continue
+                p = pair_fit(a, b, CAMPUS)
+                assert sc.total(a, b) == (p.total if p else 0), (a.user_id, b.user_id)
+                assert sc.candidate(a, b) == bool(p and p.total >= 45 and p.good_days)
+                assert sc.ok(a, b) == pair_ok(a, b, RULES)
+
+
+def test_rickshaw_carries_three():
+    four = [cand(i, methods=(RK,)) for i in range(1, 5)]
+    assert travel_modes(four) == [] and travel_modes(four[:3]) == [RK]
+
+
+def test_rider_detours():
+    from app.matching.compat import rider_detours_km
+
+    far, near = cand(1, area="Gulshan-e-Iqbal Block 10"), cand(2, area="Gulshan-e-Iqbal Block 13")
+    d = rider_detours_km([far, near], CAMPUS, 1.35)
+    assert d[2] == 0  # picked up last: rides straight to campus
+    assert 0 <= d[1] < 1.0  # Gulshan 10 -> 13 is on the way
+    assert rider_detours_km([cand(3)], CAMPUS, 1.35) == {3: 0.0}
+
+
+def test_evaluate_reports_minutes_and_occupancy():
+    from app.matching.evaluate import evaluate
+
+    pool = pool_from(make_students(60, 3))
+    m = evaluate(ALGORITHMS["compatibility"](pool, RULES, 0), pool, RULES, speed_kmh=20)
+    assert m["avg_rider_detour_min"] >= 0 and m["max_rider_detour_min"] >= m["avg_rider_detour_min"]
+    assert 0 < m["riders_within_limit"] <= 1 and 0 < m["occupancy"] <= 1
+
+
+def test_dbscan_groups_dense_areas():
+    from app.matching.optimise import dbscan
+
+    g13, g10, bahria = AREAS["Gulshan-e-Iqbal Block 13"], AREAS["Gulshan-e-Iqbal Block 10"], AREAS["Bahria Town"]
+    pts = [g13, g13, g10, g13, bahria]
+    assert haversine_km(g13, g10) > 1.5  # 1.51 km apart
+    assert dbscan(pts, eps_km=1.5) == [0, 0, -1, 0, -1]  # Gulshan 10 just outside the radius; Bahria is noise
+    assert dbscan(pts, eps_km=1.6) == [0, 0, 0, 0, -1]
+
+
+def test_detour_limit_is_a_hard_rule():
+    # Model Colony -> Bahadurabad -> campus is a long way round for the first rider.
+    far = [cand(1, area="Malir Cantt"), cand(2, area="Saddar")]
+    assert not feasible(far, RULES)
+    assert feasible(far, Rules(campus=CAMPUS, max_detour_min=None)) in (True, False)  # only the cap changed
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_exact_optimum_and_genetic_quality(seed):
+    from app.matching.algorithms import EXACT
+    from app.matching.evaluate import evaluate
+
+    pool = pool_from(make_students(40, 200 + seed))
+    score = {n: evaluate(f(pool, RULES, 0), pool, RULES)["objective"] for n, f in {**ALGORITHMS, **EXACT}.items()}
+    assert score["milp"] >= max(score.values()) - 1e-6, score  # nothing beats the optimum
+    assert score["genetic"] >= max(score["compatibility"], score["greedy"], score["dbscan_km"]) - 1e-6, score
+
+
+def test_feasibility_is_per_set_founder_first():
+    from app.matching.compat import Scorer
+
+    sc = Scorer(RULES)
+    t = lambda i: {"in": i, "out": "14:00"}  # noqa: E731
+    # Monday is the only day all three come; only b (08:20) has everyone within 20 minutes.
+    a = cand(1, sched={"Mon": t("08:00"), "Tue": t("08:30"), "Thu": t("08:30")})
+    b = cand(2, sched={"Mon": t("08:20"), "Tue": t("08:30"), "Wed": t("08:30")})
+    c = cand(3, sched={"Mon": t("08:40"), "Wed": t("08:30"), "Thu": t("08:30")})
+    assert sc.ok(a, b) and sc.ok(b, c) and sc.ok(a, c)
+    assert not sc.feasible([a, b, c]) and not sc.feasible([c, a, b]) and sc.feasible([b, a, c])
+    assert [x.user_id for x in sc.arrange([a, b, c])][0] == 2
+    assert sc.circle_fit([a, b, c]) == sc.circle_fit([c, b, a])  # fit is order-independent

@@ -60,7 +60,9 @@ def test_matching_lab(client, admin):
     for i in range(1, 6):
         student(client, i)
     res = client.post("/api/admin/compare", headers=admin).json()
-    assert {r["algorithm"] for r in res} == {"greedy", "cluster", "compatibility"}
+    assert {r["algorithm"] for r in res} == {"greedy", "cluster", "compatibility", "dbscan_km", "genetic", "milp"}
+    best = max(r["objective"] for r in res)
+    assert next(r for r in res if r["algorithm"] == "milp")["objective"] == best  # the exact optimum is never beaten
     assert client.get("/api/admin/circles", headers=admin).json() == []
     run = client.post("/api/admin/match", json={"algorithm": "compatibility"}, headers=admin).json()
     assert run["circles_created"] >= 1

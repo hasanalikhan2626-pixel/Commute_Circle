@@ -16,7 +16,7 @@ from ..areas import AREAS, area_coords
 from ..config import settings
 from ..db import get_db
 from ..deps import admin_user
-from ..matching.algorithms import ALGORITHMS
+from ..matching.algorithms import ALGORITHMS, EXACT
 from ..matching.compat import DAYS, METHODS
 from ..matching.evaluate import evaluate
 from ..matching.geo import haversine_km
@@ -212,10 +212,21 @@ def update_user(user_id: int, body: dict, db: Session = Depends(get_db), admin: 
 
 @router.post("/compare")
 def compare(seed: int = 0, db: Session = Depends(get_db), _: User = Depends(admin_user)):
-    """Dry run: every algorithm on the current pool; nothing is saved."""
+    """Dry run: every algorithm on the current pool, plus the exact optimum when the pool is
+    small enough to solve (MILP). Nothing is saved."""
     pool, r = matching_pool(db), rules_for(db)
-    return [evaluate(fn(pool, r, seed), pool, r, road_factor=settings.road_factor, fuel_price=settings.fuel_price_pkr,
-                     km_per_litre=settings.fuel_km_per_litre) for fn in ALGORITHMS.values()]
+    fns = dict(ALGORITHMS)
+    if 2 <= len(pool) <= 90:
+        fns.update(EXACT)
+    out = []
+    for fn in fns.values():
+        try:
+            res = fn(pool, r, seed)
+        except ValueError:
+            continue  # exact solver refused (too many circles to enumerate)
+        out.append(evaluate(res, pool, r, road_factor=settings.road_factor, fuel_price=settings.fuel_price_pkr,
+                            km_per_litre=settings.fuel_km_per_litre, speed_kmh=settings.avg_speed_kmh))
+    return out
 
 
 @router.post("/match")

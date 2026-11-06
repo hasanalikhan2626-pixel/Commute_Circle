@@ -93,7 +93,7 @@ def run_matching(db: Session, algorithm: str, triggered_by: int | None, seed: in
         c.members = [CircleMember(user_id=u, position=n) for n, u in enumerate(pc.member_ids)]
         db.add(c)
     metrics = evaluate(result, pool, rules, road_factor=settings.road_factor, fuel_price=settings.fuel_price_pkr,
-                       km_per_litre=settings.fuel_km_per_litre)
+                       km_per_litre=settings.fuel_km_per_litre, speed_kmh=settings.avg_speed_kmh)
     run = MatchRun(algorithm=algorithm, triggered_by=triggered_by, pool_size=len(pool),
                    circles_created=len(result.circles), students_matched=metrics["matched"], metrics=metrics)
     db.add(run)

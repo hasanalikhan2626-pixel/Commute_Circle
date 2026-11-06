@@ -3,17 +3,18 @@ import { api, download, rs } from '../../api'
 import { useToast } from '../../components/Toast'
 import { Err, Loading, useLoad } from '../../components/ui'
 
-const NAMES = { compatibility: 'Compatibility', greedy: 'Greedy', cluster: 'k-means' }
+const NAMES = { compatibility: 'Compatibility', greedy: 'Greedy', cluster: 'k-means', dbscan_km: 'DBSCAN + Kuhn–Munkres', genetic: 'Genetic Algorithm', milp: 'Exact optimum (MILP)' }
 const COLS = [
   ['match_rate', 'Match rate', (v) => `${(v * 100).toFixed(1)}%`, 'max'],
   ['circles', 'Circles', (v) => v],
   ['avg_circle_size', 'Avg size', (v) => v.toFixed(2)],
+  ['occupancy', 'Occupancy', (v) => `${Math.round(v * 100)}%`, 'max'],
   ['avg_fit', 'Avg fit', (v) => v.toFixed(1), 'max'],
-  ['avg_detour_km', 'Avg detour km', (v) => v.toFixed(2), 'min'],
-  ['avg_shared_days', 'Shared days/wk', (v) => v.toFixed(2), 'max'],
+  ['avg_rider_detour_min', 'Detour min', (v) => v.toFixed(1), 'min'],
+  ['max_rider_detour_min', 'Max detour', (v) => v.toFixed(1), 'min'],
   ['weekly_pkr_saved', 'Saved/wk', rs, 'max'],
-  ['weekly_co2_kg_saved', 'CO₂ kg/wk', (v) => v, 'max'],
-  ['runtime_ms', 'ms', (v) => v, 'min'],
+  ['objective', 'Objective', (v) => Math.round(v).toLocaleString('en-PK'), 'max'],
+  ['runtime_ms', 'ms', (v) => Math.round(v), 'min'],
 ]
 
 export default function Lab() {
@@ -31,17 +32,17 @@ export default function Lab() {
   return (
     <>
       <h2>Matching lab</h2>
-      <p className="lead">For the research component. Students normally find their own circle; here you can compare the three algorithms on everyone still unmatched, and optionally propose circles in one batch.</p>
+      <p className="lead">For the research component. Students normally find their own circle; here you can compare the matching algorithms on everyone still unmatched, and optionally propose circles in one batch.</p>
       <section className="card stack">
         <div className="row"><button className="btn" onClick={compare}>Compare algorithms (dry run)</button>
-          <select value={algo} onChange={(e) => setAlgo(e.target.value)} style={{ width: 'auto' }}>{Object.entries(NAMES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+          <select value={algo} onChange={(e) => setAlgo(e.target.value)} style={{ width: 'auto' }}>{Object.entries(NAMES).filter(([k]) => k !== 'milp').map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
           <button className="btn primary" onClick={run}>Propose circles</button>
           <button className="btn" onClick={() => download('/api/admin/research-export', 'commutecircle-research.csv').catch((e) => setErr(e.message))}>Research export (CSV)</button></div>
         <Err>{err}</Err>
         {cmp && <>
           <div className="scroll"><table className="tt"><thead><tr><th>Algorithm</th>{COLS.map(([k, l]) => <th key={k} style={{ textAlign: 'right' }}>{l}</th>)}</tr></thead>
             <tbody>{cmp.map((r) => <tr key={r.algorithm}><td><b>{NAMES[r.algorithm]}</b></td>{COLS.map(([k, , f, dir]) => <td key={k} className="mono" style={{ textAlign: 'right', ...(dir && r[k] === best(k, dir) ? { color: 'var(--accent)', fontWeight: 700 } : {}) }}>{f(r[k])}</td>)}</tr>)}</tbody></table></div>
-          <p className="hint">On {cmp[0]?.pool_size} unmatched students. Greedy = nearest-neighbour baseline; k-means = geographic clustering; Compatibility = the method students use in Find my circle. Green marks the best value. Nothing is saved.</p>
+          <p className="hint">On {cmp[0]?.pool_size} unmatched students. Greedy = nearest-neighbour baseline; k-means = geographic clustering; Compatibility = the method students use in Find my circle; DBSCAN + Kuhn–Munkres and the Genetic Algorithm are the proposal's optimisation methods; the exact optimum (shown for up to 90 students) is the best possible objective. Every circle respects the hard rules, including the 12-minute detour limit. Detour minutes assume an average speed of 22 km/h. Green marks the best value. Nothing is saved.</p>
         </>}
       </section>
       <section className="card" style={{ marginTop: 18 }}><h3 style={{ marginBottom: 8 }}>Batch runs</h3>
