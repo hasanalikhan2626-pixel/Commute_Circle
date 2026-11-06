@@ -1,61 +1,63 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../auth'
-import { Alert } from '../components/ui'
+import { useMeta } from '../meta'
+import { Err, Logo } from '../components/ui'
 
 export default function AuthPage() {
   const { login, register } = useAuth()
+  const meta = useMeta()
   const [mode, setMode] = useState('login')
-  const [f, setF] = useState({ email: '', password: '', full_name: '', phone: '', consent: false, research_consent: false })
+  const [f, setF] = useState({ email: '', password: '', full_name: '', phone: '', gender: '', programme: '', year: '1', consent: false, research_consent: false })
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
-  const set = (k) => (e) => setF({ ...f, [k]: e.target.value })
-
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value })
   const submit = async (e) => {
-    e.preventDefault()
-    setErr(''); setBusy(true)
+    e.preventDefault(); setErr(''); setBusy(true)
     try {
       if (mode === 'login') await login(f.email, f.password)
-      else await register({ email: f.email, password: f.password, full_name: f.full_name, phone: f.phone || null, consent: f.consent, research_consent: f.research_consent })
+      else await register({ ...f, year: Number(f.year) })
     } catch (ex) { setErr(ex.message) } finally { setBusy(false) }
   }
-
   return (
     <div className="auth">
-      <div className="auth-hero">
-        <div className="brand big"><span className="logo">◎</span> CommuteCircle</div>
-        <p>Share the ride to BIC with students who live near you and keep the same timetable. Split fuel, cut traffic, travel with people you know.</p>
-        <ul className="ticks">
-          <li>BIC students only (@bic.edu.pk)</li>
-          <li>Your exact address is never shared</li>
-          <li>Same-gender circles if you prefer</li>
+      <div className="pitch">
+        <div className="brand"><Logo size={44} /><div><h1 style={{ fontSize: '1.5rem', margin: 0 }}>CommuteCircle</h1><small>BIC Karachi · Korangi Creek</small></div></div>
+        <h1>Travel to campus with classmates on your route.</h1>
+        <p className="lead">We match you with BIC students who live near you, or on your way, and come to campus at the same times. Split the Careem, take turns driving, and never travel alone.</p>
+        <ul>
+          <li>BIC students only, checked by Student Affairs</li>
+          <li>Area only. We never ask for your address</li>
+          <li>Women-only circles if you prefer</li>
+          <li>Phone numbers shared only when everyone accepts</li>
         </ul>
       </div>
-      <form className="card auth-card" onSubmit={submit}>
-        <div className="tabs">
-          <button type="button" className={mode === 'login' ? 'on' : ''} onClick={() => setMode('login')}>Sign in</button>
-          <button type="button" className={mode === 'register' ? 'on' : ''} onClick={() => setMode('register')}>Create account</button>
+      <form className="card stack" onSubmit={submit}>
+        <div className="seg" role="group" aria-label="Sign in or create account" style={{ alignSelf: 'flex-start' }}>
+          <button type="button" aria-pressed={mode === 'login'} onClick={() => setMode('login')}>Sign in</button>
+          <button type="button" aria-pressed={mode === 'register'} onClick={() => setMode('register')}>Create account</button>
         </div>
+        {mode === 'register' && <label className="f">Full name<input required value={f.full_name} onChange={set('full_name')} autoComplete="name" placeholder="First and last name" /></label>}
+        <label className="f">BIC email<input required type="email" value={f.email} onChange={set('email')} autoComplete="email" placeholder="you@bic.edu.pk" /></label>
+        <label className="f">Password<input required type="password" minLength={mode === 'register' ? 8 : 1} value={f.password} onChange={set('password')} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} /></label>
         {mode === 'register' && (
-          <label>Full name<input required minLength={2} value={f.full_name} onChange={set('full_name')} autoComplete="name" /></label>
+          <>
+            <label className="f">Mobile <span className="hint">Shared only with your circle, once everyone accepts.</span>
+              <input required type="tel" value={f.phone} onChange={set('phone')} placeholder="0300 1234567" autoComplete="tel" /></label>
+            <div className="grid2">
+              <label className="f">Gender<select required value={f.gender} onChange={set('gender')}><option value="">Choose…</option><option value="female">Female</option><option value="male">Male</option></select></label>
+              <label className="f">Year<select value={f.year} onChange={set('year')}>{[1, 2, 3, 4].map((y) => <option key={y} value={y}>Year {y}</option>)}</select></label>
+            </div>
+            <label className="f">Programme<select required value={f.programme} onChange={set('programme')}><option value="">Choose…</option>{meta?.programmes.map((p) => <option key={p}>{p}</option>)}</select></label>
+            <label className="switch"><input type="checkbox" required checked={f.consent} onChange={set('consent')} />
+              <span>I accept the Terms, <Link to="/privacy" target="_blank">Privacy Notice</Link> and Code of Conduct.</span></label>
+            <label className="switch"><input type="checkbox" checked={f.research_consent} onChange={set('research_consent')} />
+              <span><span className="hint">Optional:</span> my pseudonymised trip data may be used in the project's research. <span className="hint">You can change this later.</span></span></label>
+          </>
         )}
-        <label>Student email<input required type="email" value={f.email} onChange={set('email')} autoComplete="email" placeholder="you@bic.edu.pk" /></label>
-        <label>Password<input required type="password" minLength={mode === 'register' ? 8 : 1} value={f.password} onChange={set('password')} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} /></label>
-        {mode === 'register' && (
-          <label>Mobile <span className="muted">(shared only with your circle)</span>
-            <input value={f.phone} onChange={set('phone')} placeholder="0300 1234567" autoComplete="tel" />
-          </label>
-        )}
-        {mode === 'register' && (
-          <div className="consent">
-            <label className="check"><input type="checkbox" required checked={f.consent} onChange={(e) => setF({ ...f, consent: e.target.checked })} />
-              <span>I have read and agree to the <Link to="/privacy" target="_blank">privacy notice</Link>.</span></label>
-            <label className="check"><input type="checkbox" checked={f.research_consent} onChange={(e) => setF({ ...f, research_consent: e.target.checked })} />
-              <span>Optional: my pseudonymised commute data may be used in the project's research. <span className="muted">You can change this later.</span></span></label>
-          </div>
-        )}
-        <Alert>{err}</Alert>
-        <button className="btn btn-primary" disabled={busy}>{busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}</button>
+        <Err>{err}</Err>
+        <button className="btn primary big" disabled={busy}>{busy ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create account'}</button>
+        {mode === 'register' && <p className="hint">Student Affairs checks each sign-up against the student record before you can be matched.</p>}
       </form>
     </div>
   )

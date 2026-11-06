@@ -1,49 +1,6 @@
 import { useEffect, useState } from 'react'
 
-export function Card({ title, actions, children, className = '' }) {
-  return (
-    <section className={`card ${className}`}>
-      {(title || actions) && (
-        <header className="card-head">
-          {title && <h2>{title}</h2>}
-          {actions && <div className="row">{actions}</div>}
-        </header>
-      )}
-      {children}
-    </section>
-  )
-}
-
-export function Alert({ kind = 'error', children }) {
-  if (!children) return null
-  return <div className={`alert alert-${kind}`} role={kind === 'error' ? 'alert' : 'status'}>{children}</div>
-}
-
-export function Badge({ tone = 'neutral', children }) {
-  return <span className={`badge badge-${tone}`}>{children}</span>
-}
-
-export function Stat({ label, value, hint }) {
-  return (
-    <div className="stat">
-      <div className="stat-label">{label}</div>
-      <div className="stat-value">{value}</div>
-      {hint && <div className="stat-hint">{hint}</div>}
-    </div>
-  )
-}
-
-export function Spinner({ label = 'Loading…' }) {
-  return <div className="spinner" role="status"><span className="dot" />{label}</div>
-}
-
-export const STATUS_TONE = {
-  proposed: 'warn', active: 'ok', dissolved: 'neutral',
-  pending: 'warn', accepted: 'ok', declined: 'bad', left: 'neutral',
-  open: 'bad', resolved: 'ok', dismissed: 'neutral',
-}
-
-/** Loads data with `fn`, re-running when `deps` change. Returns [data, error, reload, setData]. */
+/** Loads data with fn; re-runs when deps change. Returns [data, error, reload]. */
 export function useLoad(fn, deps = []) {
   const [state, setState] = useState({ data: undefined, error: null })
   const [n, setN] = useState(0)
@@ -54,5 +11,24 @@ export function useLoad(fn, deps = []) {
     return () => { live = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, n])
-  return [state.data, state.error, () => setN((x) => x + 1), (data) => setState({ data, error: null })]
+  return [state.data, state.error, () => setN((x) => x + 1)]
+}
+
+export const Loading = () => <div className="loading">Loading…</div>
+export const Err = ({ children }) => (children ? <div className="err" role="alert">{children}</div> : null)
+
+export function Logo({ size = 36 }) {
+  return (
+    <div className="logo" aria-hidden="true" style={{ width: size, height: size }}>
+      <svg width={size * 0.61} height={size * 0.61} viewBox="0 0 22 22">
+        <circle cx="11" cy="11" r="7.5" fill="none" stroke="#fff" strokeWidth="2" strokeDasharray="3 2.6" />
+        <circle cx="11" cy="3.5" r="2.3" fill="#fff" /><circle cx="4.5" cy="15" r="2.3" fill="#fff" /><circle cx="17.5" cy="15" r="2.3" fill="#fff" />
+      </svg>
+    </div>
+  )
+}
+
+export function Av({ name, n, sm }) {
+  const i = (name || '').split(' ').map((w) => w[0]).join('').slice(0, 2)
+  return <div className={`av${sm ? ' sm' : ''}`}>{i}{n ? <span className="o">{n}</span> : null}</div>
 }

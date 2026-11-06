@@ -167,7 +167,7 @@ def circle_out(db: Session, c: Circle, me: User) -> dict:
         "members": [_member_out(db, c, users[uid], me, n + 1, reveal) for n, uid in enumerate(order)],
         "travel_days": td, "plan": plan, "rota": rota_rows,
         "road_km": round(trips.circle_route(c)["road_km"], 1),
-        "whatsapp_name": f"CommuteCircle · {short_area(users[order[0]].profile.area)} → BIC" if order else "",
+        "whatsapp_name": f"CommuteCircle · {short_area(live[0].user.profile.area)} → BIC" if live else "",
         "share_hint": round(max(50, trips.solo(me, "Shared ride-hailing") / max(2, len(live)))),
         "is_driver_mode": c.mode in DRIVE_MODES,
     }
