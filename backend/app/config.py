@@ -53,7 +53,7 @@ class Settings:
     schedule_window_min: int = 20  # everyone arrives within this many minutes of the circle's first member
 
 
-    consent_version: str = "2026-12"  # bump when the privacy notice changes
+    consent_version: str = "2026-12b"  # bump when the privacy notice changes
 
     @property
     def production(self) -> bool:

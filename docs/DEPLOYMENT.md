@@ -65,6 +65,19 @@ touching them. Later changes are applied automatically by Alembic migrations.
   Demo logins: `admin@bic.edu.pk` / `admin12345`, students like
   `ayesha.khan@bic.edu.pk` / `student123`. Never mix demo and real data.
 
+## 7. Optional services (all work in "mock" mode until added)
+Add these under **Render → commutecircle → Environment**, then *Save, rebuild, and deploy*.
+Every message appears under Student Affairs → **Messages**, with status *sent*, *mock* or *failed*.
+
+| Service | Keys | Guide |
+|---|---|---|
+| Email (Brevo): verification codes, password reset | `CC_BREVO_API_KEY`, `CC_EMAIL_FROM` (a verified Brevo sender), `CC_EMAIL_FROM_NAME` | brevo.com → SMTP & API → API keys |
+| WhatsApp reminders, check-ins, SOS messages | `CC_WHATSAPP_TOKEN`, `CC_WHATSAPP_PHONE_ID`, `CC_WHATSAPP_APP_SECRET`, `CC_WHATSAPP_VERIFY_TOKEN`, `CC_JOBS_TOKEN` | [docs/WHATSAPP.md](WHATSAPP.md) |
+| Campus security on the SOS screen | `CC_SECURITY_PHONE`, optionally `CC_SECURITY_WHATSAPP` | – |
+
+When the privacy notice changes, existing students see a banner asking them to agree to the
+new version; nothing else is needed.
+
 ## Backups
 Neon keeps 24 hours of point-in-time history on the free tier. For extra safety,
 export weekly: `pg_dump "$CC_DATABASE_URL" > backup-YYYY-MM-DD.sql`.

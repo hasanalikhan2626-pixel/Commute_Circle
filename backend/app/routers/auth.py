@@ -24,6 +24,7 @@ def user_out(u: User) -> dict:
         "id": u.id, "email": u.email, "full_name": u.full_name, "phone": u.phone, "role": u.role.value,
         "status": u.status.value, "research_consent": u.research_consent, "email_verified": u.email_verified,
         "whatsapp_opt_in": u.whatsapp_opt_in, "emergency_name": u.emergency_name, "emergency_phone": u.emergency_phone,
+        "consent_version": u.consent_version, "consent_current": u.consent_version == settings.consent_version,
         "gender": p.gender.value if p else None, "programme": p.programme if p else None,
         "year": p.year if p else None, "has_trip": bool(p and p.area and p.schedule and p.methods),
     }
@@ -174,3 +175,11 @@ def reset(body: ResetIn, db: Session = Depends(get_db)):
     throttle.reset(user.email)
     db.commit()
     return {"access_token": create_token(user.id), "token_type": "bearer"}
+
+
+@router.post("/consent")
+def accept_notice(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Accept the current privacy notice (after it changes)."""
+    user.consented_at, user.consent_version = datetime.now(timezone.utc), settings.consent_version
+    db.commit()
+    return user_out(user)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import mimetypes
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -14,6 +15,8 @@ from .db import engine
 from .migrate import migrate
 from .routers import admin, auth, integrations, meta, student
 
+mimetypes.add_type("application/manifest+json", ".webmanifest")
+mimetypes.add_type("text/javascript", ".js")
 STATIC = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
 
 
@@ -60,5 +63,8 @@ if STATIC.exists():
 
     @app.get("/{path:path}", include_in_schema=False)
     def spa(path: str):
-        f = STATIC / path
-        return FileResponse(f if path and f.is_file() else STATIC / "index.html")
+        f = (STATIC / path).resolve()
+        if path and f.is_file() and STATIC.resolve() in f.parents:  # no escaping the build folder
+            headers = {"Cache-Control": "no-cache"} if path in ("sw.js", "manifest.webmanifest") else None
+            return FileResponse(f, headers=headers)
+        return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})

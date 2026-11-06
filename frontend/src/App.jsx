@@ -20,6 +20,7 @@ import Lab from './pages/admin/Lab'
 import Students from './pages/admin/Students'
 import Messages from './pages/admin/Messages'
 import Evaluation from './pages/admin/Evaluation'
+import NoticeBanner from './components/NoticeBanner'
 
 const CircleCtx = createContext(null)
 export const useCircle = () => useContext(CircleCtx)
@@ -66,6 +67,7 @@ function StudentApp() {
   return (
     <CircleCtx.Provider value={{ circle, reload, rematch, setRematch }}>
       <Header tabs={tabs} />
+      <NoticeBanner />
       <main className="wrap" key={loc.pathname}>
         <Routes>
           <Route path="/find" element={!active || rematch ? <Find /> : <Navigate to="/today" replace />} />

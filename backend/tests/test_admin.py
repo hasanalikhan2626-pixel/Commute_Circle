@@ -193,3 +193,15 @@ def test_email_verification_and_password_reset(client, db, monkeypatch):
     for _ in range(5):
         client.post("/api/auth/reset", json={"email": "s1@bic.edu.pk", "code": "999999" if code != "999999" else "888888", "new_password": "x1234567"})
     assert client.post("/api/auth/reset", json={"email": "s1@bic.edu.pk", "code": code, "new_password": "x1234567"}).status_code == 422
+
+
+def test_accepting_an_updated_privacy_notice(client, db):
+    from app.models import User
+
+    h = signup(client, 1)
+    assert me(client, h)["consent_current"] is True
+    u = db.query(User).filter_by(email="s1@bic.edu.pk").one()
+    u.consent_version = "2026-11"
+    db.commit()
+    assert me(client, h)["consent_current"] is False
+    assert client.post("/api/auth/consent", headers=h).json()["consent_current"] is True
