@@ -34,6 +34,7 @@ def run(db: Session) -> dict:
         db.commit()
         return out
     mins_now = now.hour * 60 + now.minute
+    ctx = trips.day_ctx(db, day)
     for c in db.scalars(select(Circle).where(Circle.status == CircleStatus.active)).all():
         if dn not in trips.travel_days(c):
             continue
@@ -44,7 +45,7 @@ def run(db: Session) -> dict:
         route = trips.circle_route(c)
         names = {m.user_id: m.user for m in c.members}
         order = " → ".join(short_area(names[u].profile.area) for u in route["order"] if u in names)
-        planned = [u for u in trips._live_users(c) if trips.planned_on(db, c, u, day)]
+        planned = [u for u in trips._live_users(c) if trips.planned_on(db, c, u, day, ctx)]
         for u in planned:
             if not (u.whatsapp_opt_in and u.phone):
                 continue

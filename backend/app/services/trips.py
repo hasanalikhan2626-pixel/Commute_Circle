@@ -11,18 +11,19 @@
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass
 from datetime import date, timedelta
 from statistics import median
 
-from sqlalchemy import select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from ..areas import area_coords
 from ..config import settings
-from ..matching.compat import allowed, minutes, route_info
+from ..matching.compat import allowed, capacity, minutes, route_info
 from ..matching.fares import rate, solo_fare
 from ..matching.geo import detour_ratio, haversine_km
-from ..models import (Absence, Circle, CircleStatus, Feedback, MemberStatus, SeatRequest, SeatStatus, Settlement,
+from ..models import (Absence, Circle, CircleStatus, Feedback, Profile, SeatRequest, SeatStatus, Settlement,
                       Trip, TripMember, TripRating, TripStatus, User)
 from . import clock
 from .candidates import LIVE, to_candidate
@@ -62,18 +63,39 @@ def arrive_time(c: Circle, d: str) -> str | None:
     return min((u.profile.schedule[d]["in"] for u in p), default=None)
 
 
+@dataclass
+class DayCtx:
+    """Everything that overrides the weekly plan on one day, loaded in two queries."""
+
+    absent: set[int]          # students who said "not going"
+    seat_of: dict[int, int]   # student -> circle hosting them for the day
+    guests: Counter           # circle -> accepted one-day guests
+
+
+def day_ctx(db: Session, day: date) -> DayCtx:
+    absent = set(db.scalars(select(Absence.user_id).where(Absence.day == day)))
+    seat_of, guests = {}, Counter()
+    q = select(SeatRequest.user_id, SeatRequest.circle_id).where(SeatRequest.day == day,
+                                                                  SeatRequest.status == SeatStatus.accepted)
+    for uid, cid in db.execute(q):
+        seat_of[uid] = cid
+        guests[cid] += 1
+    return DayCtx(absent, seat_of, guests)
+
+
 def guest_seat(db: Session, user_id: int, day: date) -> SeatRequest | None:
     return db.scalar(select(SeatRequest).filter_by(user_id=user_id, day=day, status=SeatStatus.accepted))
 
 
-def planned_on(db: Session, c: Circle, u: User, day: date) -> bool:
+def planned_on(db: Session, c: Circle, u: User, day: date, ctx: DayCtx | None = None) -> bool:
     d = clock.day_name(day)
     if not d or d not in travel_days(c) or u not in plans_on(c, d):
         return False
-    if db.scalar(select(Absence).filter_by(user_id=u.id, day=day)):
+    ctx = ctx or day_ctx(db, day)
+    if u.id in ctx.absent:
         return False
-    seat = guest_seat(db, u.id, day)
-    return not (seat and seat.circle_id != c.id)
+    host = ctx.seat_of.get(u.id)
+    return host is None or host == c.id
 
 
 def trip_on(db: Session, c: Circle, day: date) -> Trip | None:
@@ -84,7 +106,8 @@ def ensure_trip(db: Session, c: Circle, day: date) -> Trip | None:
     t = trip_on(db, c, day)
     if t or c.status != CircleStatus.active:
         return t
-    planned = [u for u in _live_users(c) if planned_on(db, c, u, day)]
+    ctx = day_ctx(db, day)
+    planned = [u for u in _live_users(c) if planned_on(db, c, u, day, ctx)]
     if len(planned) < 1:
         return None
     t = Trip(circle_id=c.id, day=day, mode=c.mode)
@@ -155,34 +178,56 @@ def circle_route(c: Circle) -> dict:
 
 # --- stats, badges, streaks -------------------------------------------------
 
-def user_stats(db: Session, u: User) -> dict:
-    went = ns = ng = trips14 = 0
-    saved = paid = 0.0
+def stats_for(db: Session, users: list[User], money: bool = True) -> dict[int, dict]:
+    """Trip counts, reliability, badges, ratings and trust for many students in a fixed
+    number of queries (4, or 6 with ``money``), however many students or trips there are."""
+    by_id = {u.id: u for u in users}
+    ids = list(by_id)
+    if not ids:
+        return {}
     cut = clock.past_weekdays(10)[0]
-    q = select(TripMember, Trip).join(Trip).where(TripMember.user_id == u.id)
-    for tm, t in db.execute(q):
-        if tm.status == TripStatus.went and t.confirmed_by:
-            went += 1
-            if t.day >= cut:
-                trips14 += 1
-            share = share_of(t, u.id)
-            if share is not None and u.profile:
-                paid += share
-                saved += max(0.0, solo(u, t.mode) - share)
-        elif tm.status == TripStatus.noshow:
-            ns += 1
-        elif tm.status == TripStatus.notgoing:
-            ng += 1
-    rel = round(went / (went + ns) * 100) if went + ns else None
-    stars = [r.stars for r in db.scalars(select(TripRating).where(TripRating.ratee_id == u.id))]
-    tags = Counter(f.tag for f in db.scalars(select(Feedback).where(Feedback.to_id == u.id, Feedback.up.is_(True))))
-    badges = [k for k, v in tags.items() if v >= 2 and went >= 5]
-    if rel is not None and rel >= 95 and went >= 5 and "Punctual" not in badges:
-        badges.insert(0, "Reliable")
-    return {"went": went, "noshow": ns, "notgoing": ng, "reliability": rel, "saved": round(saved),
-            "paid": round(paid), "trips14": trips14, "badges": badges, "active": trips14 > 0,
-            "ratings": len(stars), "avg_stars": round(sum(stars) / len(stars), 2) if stars else None,
-            "trust": trust_score(stars, went, ns)}
+    conf = Trip.confirmed_by.is_not(None)
+    went_c = (TripMember.status == TripStatus.went) & conf
+    n = lambda cond: func.sum(case((cond, 1), else_=0))  # noqa: E731
+    q = (select(TripMember.user_id, n(went_c), n(went_c & (Trip.day >= cut)), n(TripMember.status == TripStatus.noshow),
+                n(TripMember.status == TripStatus.notgoing))
+         .join(Trip).where(TripMember.user_id.in_(ids)).group_by(TripMember.user_id))
+    counts = {uid: (int(w or 0), int(r or 0), int(ns or 0), int(ng or 0)) for uid, w, r, ns, ng in db.execute(q)}
+    stars: dict[int, list[int]] = {}
+    for uid, st in db.execute(select(TripRating.ratee_id, TripRating.stars).where(TripRating.ratee_id.in_(ids))):
+        stars.setdefault(uid, []).append(st)
+    tags: dict[int, Counter] = {}
+    for uid, tag in db.execute(select(Feedback.to_id, Feedback.tag).where(Feedback.to_id.in_(ids), Feedback.up.is_(True))):
+        tags.setdefault(uid, Counter())[tag] += 1
+    paid: Counter = Counter()
+    saved: Counter = Counter()
+    if money:
+        mine = select(TripMember.trip_id).where(TripMember.user_id.in_(ids), TripMember.status == TripStatus.went)
+        for t in db.scalars(select(Trip).where(Trip.total > 0, conf, Trip.id.in_(mine))):
+            who = sharers(t)
+            for uid in who:
+                u = by_id.get(uid)
+                if u is not None and u.profile and u.profile.area:
+                    share = t.total / len(who)
+                    paid[uid] += share
+                    saved[uid] += max(0.0, solo(u, t.mode) - share)
+    out = {}
+    for uid in ids:
+        went, trips14, ns, ng = counts.get(uid, (0, 0, 0, 0))
+        rel = round(went / (went + ns) * 100) if went + ns else None
+        badges = [k for k, v in tags.get(uid, {}).items() if v >= 2 and went >= 5]
+        if rel is not None and rel >= 95 and went >= 5 and "Punctual" not in badges:
+            badges.insert(0, "Reliable")
+        s_ = stars.get(uid, [])
+        out[uid] = {"went": went, "noshow": ns, "notgoing": ng, "reliability": rel, "saved": round(saved[uid]),
+                    "paid": round(paid[uid]), "trips14": trips14, "badges": badges, "active": trips14 > 0,
+                    "ratings": len(s_), "avg_stars": round(sum(s_) / len(s_), 2) if s_ else None,
+                    "trust": trust_score(s_, went, ns)}
+    return out
+
+
+def user_stats(db: Session, u: User) -> dict:
+    return stats_for(db, [u])[u.id]
 
 
 # Bayesian trust score, 0-5 (proposal 14.7 stage 3). Two parts, equally weighted:
@@ -200,17 +245,23 @@ def trust_score(stars: list[int], went: int, noshow: int) -> float:
     return round(0.5 * rating + 0.5 * 5 * reliable, 2)
 
 
-def streak(db: Session, c: Circle) -> int:
+STREAK_WEEKDAYS = 40
+
+
+def streak(db: Session, c: Circle, confirmed_days: set[date] | None = None) -> int:
     """Consecutive travel days (most recent first) with a confirmed trip."""
+    past = clock.past_weekdays(STREAK_WEEKDAYS)
+    if confirmed_days is None:
+        confirmed_days = set(db.scalars(select(Trip.day).where(Trip.circle_id == c.id, Trip.day >= past[0],
+                                                               Trip.confirmed_by.is_not(None))))
     td = set(travel_days(c))
     n = 0
-    for d in reversed(clock.past_weekdays(40)):
+    for d in reversed(past):
         if c.since and d < c.since:
             break
         if clock.day_name(d) not in td:
             continue
-        t = trip_on(db, c, d)
-        if not (t and t.confirmed_by):
+        if d not in confirmed_days:
             break
         n += 1
     return n
@@ -261,16 +312,30 @@ def settle_all(db: Session, c: Circle) -> None:
         db.delete(s)
 
 
-def route_fares(db: Session, area: str, mode: str) -> list[float]:
-    """Per-person shares entered for trips by members from ``area`` using ``mode``."""
+FARE_WINDOW_DAYS = 90  # fare guides use recent fares only, so they keep up with prices
+
+
+def fare_shares(db: Session, mode: str | None = None) -> list[tuple[str, str, float]]:
+    """(area, way of travelling, per-person share) for every fare entered in the last
+    ``FARE_WINDOW_DAYS`` days, in three queries."""
+    q = select(Trip).where(Trip.total > 0, Trip.confirmed_by.is_not(None),
+                           Trip.day >= clock.today() - timedelta(days=FARE_WINDOW_DAYS))
+    if mode:
+        q = q.where(Trip.mode == mode)
+    trips = db.scalars(q).all()
+    uids = {u for t in trips for u in sharers(t)}
+    area = dict(db.execute(select(Profile.user_id, Profile.area).where(Profile.user_id.in_(uids))).all()) if uids else {}
     out = []
-    q = select(Trip).where(Trip.mode == mode, Trip.total > 0, Trip.confirmed_by.is_not(None))
-    for t in db.scalars(q):
-        for uid in sharers(t):
-            u = db.get(User, uid)
-            if u and u.profile and u.profile.area == area:
-                out.append(t.total / len(sharers(t)))
+    for t in trips:
+        who = sharers(t)
+        out += [(area[u], t.mode, t.total / len(who)) for u in who if area.get(u)]
     return out
+
+
+def route_fares(db: Session, area: str, mode: str, shares: list | None = None) -> list[float]:
+    """Per-person shares entered for trips by members from ``area`` using ``mode``."""
+    shares = fare_shares(db, mode) if shares is None else shares
+    return [s for a, m, s in shares if a == area and m == mode]
 
 
 def circle_cost(c: Circle) -> dict:
@@ -290,24 +355,24 @@ def share_suggestions(db: Session, u: User, c: Circle) -> list[int]:
 # --- one-day seats ----------------------------------------------------------
 
 def seat_options(db: Session, u: User, day: date, own: Circle | None) -> list[dict]:
-    from .candidates import approved_profiles  # noqa: F401  (import cycle guard)
-
     d = clock.day_name(day)
     if not d or not u.profile or d not in (u.profile.schedule or {}):
         return []
     me = to_candidate(u.profile)
+    ctx = day_ctx(db, day)
     out = []
     for c in db.scalars(select(Circle).where(Circle.status == CircleStatus.active)):
         if own and c.id == own.id:
             continue
         users = _live_users(c)
-        if not users or not all(allowed(me, to_candidate(x.profile)) for x in users) or d not in travel_days(c):
+        cands = [to_candidate(x.profile) for x in users]
+        if not users or not all(allowed(me, x) for x in cands) or d not in travel_days(c):
             continue
-        going = [x for x in users if planned_on(db, c, x, day)]
-        guests = db.scalars(select(SeatRequest).filter_by(circle_id=c.id, day=day, status=SeatStatus.accepted)).all()
-        free = settings.max_circle_size - len(going) - len(guests)
-        near = min(haversine_km(me.location, to_candidate(x.profile).location) for x in users)
-        on_way = any(detour_ratio(me.location, to_candidate(x.profile).location, CAMPUS()) <= 0.12 for x in users)
+        going = sum(planned_on(db, c, x, day, ctx) for x in users)
+        # Free seats in the vehicle the circle actually uses (rickshaw 3, motorbike 2, car seats...).
+        free = min(settings.max_circle_size, capacity(c.mode, cands)) - going - ctx.guests[c.id]
+        near = min(haversine_km(me.location, x.location) for x in cands)
+        on_way = any(detour_ratio(me.location, x.location, CAMPUS()) <= 0.12 for x in cands)
         arrive = arrive_time(c, d)
         dt = abs(minutes(arrive) - minutes(u.profile.schedule[d]["in"])) if arrive else 999
         if free > 0 and (near <= 8 or on_way) and dt <= 30:

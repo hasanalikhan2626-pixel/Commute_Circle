@@ -35,7 +35,7 @@ export default function Lab() {
       <p className="lead">For the research component. Students normally find their own circle; here you can compare the matching algorithms on everyone still unmatched, and optionally propose circles in one batch.</p>
       <section className="card stack">
         <div className="row"><button className="btn" onClick={compare}>Compare algorithms (dry run)</button>
-          <select value={algo} onChange={(e) => setAlgo(e.target.value)} style={{ width: 'auto' }}>{Object.entries(NAMES).filter(([k]) => k !== 'milp').map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+          <select aria-label="Algorithm for proposing circles" value={algo} onChange={(e) => setAlgo(e.target.value)} style={{ width: 'auto' }}>{Object.entries(NAMES).filter(([k]) => k !== 'milp').map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
           <button className="btn primary" onClick={run}>Propose circles</button>
           <button className="btn" onClick={() => download('/api/admin/research-export', 'commutecircle-research.csv').catch((e) => setErr(e.message))}>Research export (CSV)</button></div>
         <Err>{err}</Err>

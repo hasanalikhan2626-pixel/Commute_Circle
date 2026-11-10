@@ -4,7 +4,7 @@ import io
 
 import pytest
 
-from tests.conftest import circle_of, me, signup, student, trip
+from tests.conftest import circle_of, me, signup, student
 
 from app.config import Settings, _db_url
 
@@ -205,3 +205,61 @@ def test_accepting_an_updated_privacy_notice(client, db):
     db.commit()
     assert me(client, h)["consent_current"] is False
     assert client.post("/api/auth/consent", headers=h).json()["consent_current"] is True
+
+
+def test_password_reset_signs_out_other_devices(client, monkeypatch):
+    from app.services import codes
+
+    sent = {}
+    real = codes.send
+    monkeypatch.setattr(codes, "send", lambda d, u, p: sent.__setitem__(p, real(d, u, p)) or sent[p])
+    old = signup(client, 1)
+    client.post("/api/auth/forgot", json={"email": "s1@bic.edu.pk"})
+    r = client.post("/api/auth/reset", json={"email": "s1@bic.edu.pk", "code": sent["reset"], "new_password": "brand-new-1"})
+    new = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    assert client.get("/api/auth/me", headers=old).status_code == 401  # the old login no longer works
+    assert client.get("/api/auth/me", headers=new).status_code == 200
+
+
+def test_deleting_account_erases_message_log(client, db):
+    from app.models import Notification
+
+    h = signup(client, 1)
+    assert db.query(Notification).filter(Notification.to == "s1@bic.edu.pk").count() == 1  # verification email
+    exp = client.get("/api/auth/me/export", headers=h).json()
+    assert exp["messages_sent_to_me"] and "surveys" in exp and "ratings_given" in exp
+    client.request("DELETE", "/api/auth/me", json={"password": "password123"}, headers=h)
+    assert db.query(Notification).count() == 0
+
+
+def test_pages_use_a_bounded_number_of_queries(client, db, monkeypatch):
+    """Regression: screens once made hundreds to thousands of queries (N+1). With the demo data
+    (71 students, 15 circles, ~200 trips) every screen must stay within a small fixed budget."""
+    from sqlalchemy import event
+
+    import app.seed as seed_mod
+    from app.db import engine
+
+    monkeypatch.setenv("CC_SEED_DEMO", "true")
+    seed_mod.seed_if_empty()
+    n = [0]
+
+    def count(*a, **k):
+        n[0] += 1
+
+    def login(email, pw):
+        r = client.post("/api/auth/login", data={"username": email, "password": pw})
+        return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+    student, admin = login("ayesha.khan@bic.edu.pk", "student123"), login("admin@bic.edu.pk", "admin12345")
+    event.listen(engine, "before_cursor_execute", count)
+    try:
+        for h, paths in ((student, ["/api/circle", "/api/today", "/api/money", "/api/savings", "/api/seats"]),
+                         (admin, ["/api/admin/usage", "/api/admin/fares", "/api/admin/health", "/api/admin/evaluation",
+                                  "/api/admin/research-export", "/api/admin/users"])):
+            for p in paths:
+                n[0] = 0
+                assert client.get(p, headers=h).status_code == 200, p
+                assert n[0] <= 40, f"{p} made {n[0]} queries"
+    finally:
+        event.remove(engine, "before_cursor_execute", count)

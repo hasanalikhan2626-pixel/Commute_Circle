@@ -46,7 +46,7 @@ def register(body: RegisterIn, db: Session = Depends(get_db)):
 
     codes.send(db, user, "verify")
     db.commit()
-    return {"access_token": create_token(user.id), "token_type": "bearer"}
+    return {"access_token": create_token(user.id, user.password_hash), "token_type": "bearer"}
 
 
 @router.post("/login")
@@ -61,7 +61,7 @@ def login(form: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get
     if not user.can_sign_in:
         raise HTTPException(status.HTTP_403_FORBIDDEN, f"This account is {user.status.value}. Contact Student Affairs.")
     throttle.reset(email)
-    return {"access_token": create_token(user.id), "token_type": "bearer"}
+    return {"access_token": create_token(user.id, user.password_hash), "token_type": "bearer"}
 
 
 @router.get("/me")
@@ -83,9 +83,10 @@ def update_me(body: UserUpdate, user: User = Depends(current_user), db: Session 
 @router.get("/me/export")
 def export_my_data(user: User = Depends(current_user), db: Session = Depends(get_db)):
     """Everything stored about the signed-in student (right of access)."""
-    from ..models import Feedback, TripMember
+    from ..models import Feedback, Notification, SosAlert, SurveyResponse, TripMember, TripRating
 
     p = user.profile
+    received = list(db.scalars(select(TripRating.stars).where(TripRating.ratee_id == user.id)))
     return {
         "account": {"email": user.email, "full_name": user.full_name, "phone": user.phone, "role": user.role.value,
                     "status": user.status.value, "created_at": user.created_at, "consented_at": user.consented_at,
@@ -102,6 +103,17 @@ def export_my_data(user: User = Depends(current_user), db: Session = Depends(get
                            for f in db.scalars(select(Feedback).where(Feedback.from_id == user.id))],
         "reports_made": [{"reason": r.reason, "details": r.details, "status": r.status.value, "created_at": r.created_at}
                          for r in db.scalars(select(Report).where(Report.reporter_id == user.id))],
+        "emergency_contact": {"name": user.emergency_name, "phone": user.emergency_phone},
+        "settings": {"whatsapp_opt_in": user.whatsapp_opt_in, "email_verified": user.email_verified},
+        "ratings_given": [{"stars": r.stars, "created_at": r.created_at}
+                          for r in db.scalars(select(TripRating).where(TripRating.rater_id == user.id))],
+        "ratings_received": {"count": len(received), "average": round(sum(received) / len(received), 2) if received else None},
+        "surveys": [{"kind": r.kind, "answers": r.answers, "score": r.score, "created_at": r.created_at}
+                    for r in db.scalars(select(SurveyResponse).where(SurveyResponse.user_id == user.id))],
+        "sos_alerts": [{"message": a.message, "route": a.route, "created_at": a.created_at}
+                       for a in db.scalars(select(SosAlert).where(SosAlert.user_id == user.id))],
+        "messages_sent_to_me": [{"channel": n.channel, "template": n.template, "status": n.status, "created_at": n.created_at}
+                                for n in db.scalars(select(Notification).where(Notification.user_id == user.id))],
     }
 
 
@@ -110,7 +122,13 @@ def delete_account(body: DeleteAccountIn, user: User = Depends(current_user), db
     """Permanently delete the account (right to erasure). Leaves any live circle first."""
     if not verify_password(body.password, user.password_hash):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Password is incorrect")
+    from sqlalchemy import delete
+
+    from ..models import Notification
+
     svc.remove_user_everywhere(db, user)
+    # The message log holds the student's email address and phone number: erase it too.
+    db.execute(delete(Notification).where(Notification.user_id == user.id))
     db.delete(user)
     db.commit()
 
@@ -174,7 +192,7 @@ def reset(body: ResetIn, db: Session = Depends(get_db)):
     user.email_verified = True  # they proved they own the inbox
     throttle.reset(user.email)
     db.commit()
-    return {"access_token": create_token(user.id), "token_type": "bearer"}
+    return {"access_token": create_token(user.id, user.password_hash), "token_type": "bearer"}
 
 
 @router.post("/consent")

@@ -4,7 +4,6 @@ from __future__ import annotations
 from .compat import Rules, capacity, group_days, rider_detours_min, route_info
 from . import roads
 from .fares import PASSENGER_PAYS, rate, solo_fare
-from .geo import haversine_km
 from .types import Candidate, MatchResult
 
 

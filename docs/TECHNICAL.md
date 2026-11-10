@@ -1,6 +1,6 @@
 # CommuteCircle: Technical Documentation
 
-_Version 2.1 (November 2026). Rebuilt to match the CommuteCircle prototype
+_Version 2.2 (November 2026). Rebuilt to match the CommuteCircle prototype
 (`CommuteCircle_Prototype.html`) and the CE201 project proposal. Campus: BIC Karachi,
 273/1/A Main Ibrahim Hyderi Road, Korangi Creek, Karachi 75190 (24.8086702, 67.1217257)._
 
@@ -315,13 +315,20 @@ Interactive docs at `/docs` in development (hidden in production).
 ## 10. Security and personal data
 
 * bcrypt passwords; JWT bearer tokens (12 h); 5 failed logins per email in 15 min → 429.
+  Tokens carry a keyed stamp of the password hash, so resetting or changing a password signs
+  out every other device.
+* Abuse limits: one feedback per classmate per day (no badge farming or repeated no-show
+  marks); pressing SOS again within 5 minutes updates the same alert instead of messaging
+  everyone twice; one live one-day-seat request per day; seat offers respect the vehicle's
+  real capacity (rickshaw 3, motorbike 2).
 * Only `@bic.edu.pk` addresses can register; email ownership is verified by code; every
   account waits for Student Affairs approval.
 * Consent to the Terms, Privacy Notice and Code of Conduct is required and logged with its
   version; when the notice changes, students are asked to agree again. Research consent is
   separate, optional and reversible. WhatsApp is opt-in and can be stopped by replying STOP.
-* Students can download all their data and delete their account (password confirmed);
-  safety reports survive deletion without identifying the person.
+* Students can download all their data (including ratings, surveys, SOS alerts and the log of
+  messages sent to them) and delete their account (password confirmed); deletion also erases
+  their entries in the message log; safety reports survive without identifying the person.
 * The research export contains opted-in students only, with keyed-hash IDs and no names,
   emails or phone numbers.
 * WhatsApp webhooks must carry Meta's HMAC signature; the jobs endpoint needs a secret token;
@@ -331,16 +338,35 @@ Interactive docs at `/docs` in development (hidden in production).
 * Security headers on every response (HSTS in production); static files cannot escape the
   build folder; the container runs as non-root.
 
-## 11. Installable app (PWA)
+## 11. Performance
+
+Every screen makes a small, fixed number of database queries however many students or trips
+exist, which matters because the database (Neon) is reached over the network.
+Relationships that are always needed load eagerly (a circle with its members and their
+profiles; a trip with its members); statistics for many students come from grouped SQL
+(`services/trips.py::stats_for`); fare guides use the last 90 days of fares in three queries.
+
+| Screen (demo data: 71 students, ~200 trips) | Queries before | Now |
+|---|---|---|
+| Student Affairs → Fares | 18,434 | 6 |
+| Student Affairs → Circle health | 821 | 9 |
+| Student Affairs → Usage | 781 | 13 |
+| My savings | 594 | 13 |
+| Today | 319 | 27 |
+| One-day seats | 115 | 7 |
+
+A test fails if any of these screens goes above 40 queries.
+
+## 12. Installable app (PWA)
 
 `frontend/public` holds the web app manifest, icons (192, 512, maskable, Apple touch) and a
 service worker. The app shell is cached so the app opens instantly and can be added to the
 home screen; **API calls always go to the network**, so trips, money and SOS are never stale.
 
-## 12. Testing
+## 13. Testing
 
-`backend/tests/` holds **87 automated tests**, run on both SQLite and PostgreSQL 16 by GitHub
-Actions on every push.
+`backend/tests/` holds **92 automated tests**, run on both SQLite and PostgreSQL 16 by GitHub
+Actions on every push, together with a lint check (ruff).
 
 * **Matching and research (49):** fit score parts, women-only, detour, timetable window, travel
   modes and capacities (rickshaw 3, motorbike 2), feasibility, founder order, options; the NumPy
@@ -348,15 +374,17 @@ Actions on every push.
   every algorithm over random pools never breaks a rule, never places a student twice and is
   deterministic; the exact optimum is never beaten and the Genetic Algorithm never does worse than
   its seeds; the cost card matches Appendix C; the privacy simulation.
-* **Student journeys (22):** sign-up validation and unique phones, approval gate, trip questions,
+* **Student journeys (24):** sign-up validation and unique phones, approval gate, trip questions,
   options and acceptance, availability re-check, decline memory, women-only, check-in and
   correction, fares and balances, passenger-pays modes, not going tomorrow, weekends, fair rota,
   travel mode and leaving, feedback and no-shows, report and leave, one-day seats, re-matching,
-  savings, SOS, ratings and trust, surveys and SUS scoring, WhatsApp jobs, webhook and replies.
-* **Student Affairs and safety (14):** admin-only access, approvals, usage/fares/health,
+  savings, SOS, ratings and trust, surveys and SUS scoring, WhatsApp jobs, webhook and replies,
+  abuse limits, seat offers and vehicle capacity.
+* **Student Affairs and safety (17):** admin-only access, approvals, usage/fares/health,
   suspension from a report, matching lab, export and deletion, login throttle, admin bootstrap,
   production guards, safe v1 migration, demo seeding, email verification and password reset,
-  re-consent to an updated privacy notice.
+  re-consent to an updated privacy notice, sign-out on password reset, erasing the message log,
+  and the per-screen query budget.
 * **Migrations (2):** the migrations build exactly the models' schema; upgrading keeps rows.
 
 The v1 → v2.1 upgrade was also run in production mode on PostgreSQL with a copy of the live
@@ -365,7 +393,7 @@ screen rendered side by side with the prototype; a full journey (sign up → app
 classmates accept → check in → fare → money) with no console or server errors; no horizontal
 scrolling at phone width.
 
-## 13. Known limitations and next steps
+## 14. Known limitations and next steps
 
 * Pickup points are area centres (≈ 660 m average walk in the simulation); a catalogue of
   public landmarks shared by ≥ 3 students would meet the 300 m target without losing anonymity.
@@ -373,4 +401,7 @@ scrolling at phone width.
   and hour.
 * WhatsApp needs a Meta Business account and approved templates; until then it runs in mock mode.
 * The login throttle is per process; use Redis if running several workers.
+* The proposal's “repeat cancellations reduce matching priority” is not implemented: low trust
+  is flagged to Student Affairs (Circle health) but does not yet change who is suggested.
+* There are no automated front-end tests in CI; the browser checks are run by hand.
 * All results so far are synthetic; the pilot must provide the real evaluation.

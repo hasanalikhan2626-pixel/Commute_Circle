@@ -10,8 +10,8 @@ from statistics import median
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import case, func, select
+from sqlalchemy.orm import Session, contains_eager
 
 from ..areas import AREAS, area_coords
 from ..config import settings
@@ -46,29 +46,42 @@ def _circle_ids_by_user(db) -> dict[int, int]:
     return out
 
 
+def _trip_totals(db: Session, by_circle: bool = False):
+    """(planned, completed, no-shows) over every trip except today's unconfirmed ones, in one query."""
+    done = case(((TripMember.status == TripStatus.went) & Trip.confirmed_by.is_not(None), 1), else_=0)
+    noshow = case((TripMember.status == TripStatus.noshow, 1), else_=0)
+    cols = [func.count(), func.sum(done), func.sum(noshow)]
+    q = select(*([Trip.circle_id] if by_circle else []), *cols).select_from(TripMember).join(Trip).where(
+        ~((Trip.day == clock.today()) & Trip.confirmed_by.is_(None)))
+    if by_circle:
+        return {cid: (int(n or 0), int(d or 0), int(ns or 0)) for cid, n, d, ns in db.execute(q.group_by(Trip.circle_id))}
+    n, d, ns = db.execute(q).one()
+    return int(n or 0), int(d or 0), int(ns or 0)
+
+
+def _count(db: Session, *where) -> int:
+    return db.scalar(select(func.count()).where(*where)) or 0
+
+
 @router.get("/usage")
 def usage(db: Session = Depends(get_db), _: User = Depends(admin_user)):
-    students = [u for u in _students(db) if u.status == UserStatus.approved]
+    everyone = _students(db)
+    students = [u for u in everyone if u.status == UserStatus.approved]
     in_circle = _circle_ids_by_user(db)
-    stats = {u.id: trips.user_stats(db, u) for u in students}
+    stats = trips.stats_for(db, students, money=False)
     active = {u.id for u in students if stats[u.id]["active"]}
     rated = [stats[u.id]["trust"] for u in students if stats[u.id]["went"] or stats[u.id]["ratings"]]
     women = [u for u in students if u.profile and u.profile.gender.value == "female" and u.profile.area]
-    planned = done = 0
+    planned, done, _ns = _trip_totals(db)
     today = clock.today()
-    for t in db.scalars(select(Trip)):
-        if t.day == today and not t.confirmed_by:
-            continue
-        for m in t.members:
-            planned += 1
-            done += int(m.status == TripStatus.went and bool(t.confirmed_by))
     days = clock.past_weekdays(20) + ([today] if today.weekday() < 5 else [])
-    per_day = [{"day": d.isoformat(), "n": len(db.scalars(select(Trip).where(Trip.day == d, Trip.confirmed_by.is_not(None))).all())}
-               for d in days]
-    circles = db.scalars(select(Circle).where(Circle.status == CircleStatus.active)).all()
+    confirmed = Trip.confirmed_by.is_not(None)
+    by_day = dict(db.execute(select(Trip.day, func.count()).where(Trip.day >= days[0], confirmed).group_by(Trip.day)).all())
+    per_day = [{"day": d.isoformat(), "n": by_day.get(d, 0)} for d in days]
+    n_circles = _count(db, Circle.status == CircleStatus.active)
     week = clock.past_weekdays(5)
-    travelling = sum(1 for c in circles if db.scalar(select(Trip).where(Trip.circle_id == c.id, Trip.day >= week[0],
-                                                                         Trip.confirmed_by.is_not(None))))
+    travelling = db.scalar(select(func.count(func.distinct(Trip.circle_id))).join(Circle).where(
+        Circle.status == CircleStatus.active, Trip.day >= week[0], confirmed)) or 0
     areas = []
     for a in AREAS:
         ss = [u for u in students if u.profile and u.profile.area == a]
@@ -79,29 +92,29 @@ def usage(db: Session = Depends(get_db), _: User = Depends(admin_user)):
     areas.sort(key=lambda r: (-r["without"], -r["members"]))
     return {"approved": len(students), "in_circle": sum(1 for u in students if u.id in in_circle),
             "active": len(active), "completion": round(done / planned * 100) if planned else 0,
-            "circles": len(circles), "circles_travelling": travelling,
+            "circles": n_circles, "circles_travelling": travelling,
             "without": sum(1 for u in students if u.id not in in_circle), "per_day": per_day, "areas": areas,
-            "pending": sum(1 for u in _students(db) if u.status == UserStatus.pending),
+            "pending": sum(1 for u in everyone if u.status == UserStatus.pending),
             "avg_trust": round(sum(rated) / len(rated), 2) if rated else None,
             "trust_45": round(sum(t >= 4.5 for t in rated) / len(rated) * 100) if rated else None,
             "women_only_pct": round(sum(u.profile.women_only for u in women) / len(women) * 100) if women else None,
-            "open_sos": len(db.scalars(select(SosAlert).where(SosAlert.handled.is_(False))).all()),
-            "open_reports": len(db.scalars(select(Report).where(Report.status == ReportStatus.open)).all())}
+            "open_sos": _count(db, SosAlert.handled.is_(False)),
+            "open_reports": _count(db, Report.status == ReportStatus.open)}
 
 
 @router.get("/fares")
 def fares(db: Session = Depends(get_db), _: User = Depends(admin_user)):
+    """Medians of fares entered in the last 90 days, by area and way of travelling."""
+    grouped: dict[tuple[str, str], list[float]] = {}
+    for area, mode, share in trips.fare_shares(db):
+        grouped.setdefault((area, mode), []).append(share)
     rows = []
-    for a in AREAS:
-        for md in METHODS:
-            if trips.rate_for(md) <= 0:
-                continue
-            v = trips.route_fares(db, a, md)
-            if len(v) >= 3:
-                km = roads.km(area_coords(a), CAMPUS(), settings.road_factor)
-                rows.append({"area": a, "mode": md, "n": len(v), "median": round(median(v)), "road_km": round(km, 1),
-                             "per_km": median(v) / km if km else 0})
-    rows.sort(key=lambda r: -r["median"])
+    for (a, md), v in grouped.items():
+        if len(v) >= 3 and a in AREAS and trips.rate_for(md) > 0:
+            km = roads.km(area_coords(a), CAMPUS(), settings.road_factor)
+            rows.append({"area": a, "mode": md, "n": len(v), "median": round(median(v)), "road_km": round(km, 1),
+                         "per_km": median(v) / km if km else 0})
+    rows.sort(key=lambda r: (-r["median"], r["area"], r["mode"]))
     by_mode = []
     for md in METHODS:
         if trips.rate_for(md) <= 0:
@@ -109,9 +122,9 @@ def fares(db: Session = Depends(get_db), _: User = Depends(admin_user)):
         rr = [r for r in rows if r["mode"] == md]
         by_mode.append({"mode": md, "per_km": round(median([r["per_km"] for r in rr]), 1) if rr else None,
                         "n": sum(r["n"] for r in rr)})
-    conf = db.scalars(select(Trip).where(Trip.confirmed_by.is_not(None))).all()
-    with_fare = sum(1 for t in conf if t.total and t.total > 0)
-    return {"by_mode": by_mode, "fare_pct": round(with_fare / len(conf) * 100) if conf else 0,
+    n_conf = _count(db, Trip.confirmed_by.is_not(None))
+    with_fare = _count(db, Trip.confirmed_by.is_not(None), Trip.total > 0)
+    return {"by_mode": by_mode, "fare_pct": round(with_fare / n_conf * 100) if n_conf else 0,
             "rows": [{k: v for k, v in r.items() if k != "per_km"} for r in rows]}
 
 
@@ -122,26 +135,26 @@ def _short(name: str) -> str:
 
 @router.get("/health")
 def health(db: Session = Depends(get_db), _: User = Depends(admin_user)):
-    today = clock.today()
+    circles = db.scalars(select(Circle).where(Circle.status == CircleStatus.active)).all()
+    totals = _trip_totals(db, by_circle=True)
+    members = [m.user for c in circles for m in c.members if m.status in LIVE]
+    stats = trips.stats_for(db, members, money=False)
+    neg_by = dict(db.execute(select(Feedback.to_id, func.count()).where(Feedback.up.is_(False)).group_by(Feedback.to_id)).all())
+    start = clock.past_weekdays(trips.STREAK_WEEKDAYS)[0]
+    conf_days: dict[int, set] = {}
+    for cid, day in db.execute(select(Trip.circle_id, Trip.day).where(Trip.day >= start, Trip.confirmed_by.is_not(None))):
+        conf_days.setdefault(cid, set()).add(day)
     rows = []
-    for c in db.scalars(select(Circle).where(Circle.status == CircleStatus.active)):
+    for c in circles:
         live = [m for m in c.members if m.status in LIVE]
-        pl = dn = ns = 0
-        for t in db.scalars(select(Trip).where(Trip.circle_id == c.id)):
-            if t.day == today and not t.confirmed_by:
-                continue
-            for m in t.members:
-                pl += 1
-                dn += int(m.status == TripStatus.went and bool(t.confirmed_by))
-                ns += int(m.status == TripStatus.noshow)
-        ids = [m.user_id for m in live]
-        neg = len(db.scalars(select(Feedback).where(Feedback.up.is_(False), Feedback.to_id.in_(ids))).all())
+        pl, dn, ns = totals.get(c.id, (0, 0, 0))
+        neg = sum(neg_by.get(m.user_id, 0) for m in live)
         rate = round(dn / pl * 100) if pl else 0
-        trusts = [trips.user_stats(db, m.user)["trust"] for m in live]
+        trusts = [stats[m.user_id]["trust"] for m in live]
         rows.append({"circle_id": c.id, "members": [_short(m.user.full_name) for m in live],
                      "trust": round(sum(trusts) / len(trusts), 2) if trusts else None,
                      "areas": sorted({m.user.profile.area for m in live}), "mode": c.mode, "completed": rate,
-                     "noshows": ns, "negative": neg, "streak": trips.streak(db, c),
+                     "noshows": ns, "negative": neg, "streak": trips.streak(db, c, conf_days.get(c.id, set())),
                      "check_in": rate < 75 or ns >= 3 or neg >= 2 or (bool(trusts) and min(trusts) < 3.5)})
     return sorted(rows, key=lambda r: r["completed"])
 
@@ -318,11 +331,14 @@ def research_export(db: Session = Depends(get_db), _: User = Depends(admin_user)
     w.writerow(["pid", "programme", "year", "area", "gender", "women_only", "methods", "has_car", "has_bike",
                 "days_per_week", *[f"{d.lower()}_arrive" for d in DAYS], "in_active_circle", "circle_pid",
                 "trips_travelled", "reliability_pct", "ratings_received", "trust_score"])
-    q = select(Profile).join(User).where(User.research_consent.is_(True), User.status == UserStatus.approved)
-    for p in db.scalars(q.order_by(Profile.user_id)):
+    q = (select(Profile).join(Profile.user).options(contains_eager(Profile.user))
+         .where(User.research_consent.is_(True), User.status == UserStatus.approved))
+    profiles = db.scalars(q.order_by(Profile.user_id)).all()
+    stats = trips.stats_for(db, [p.user for p in profiles], money=False)
+    for p in profiles:
         sched = p.schedule or {}
         cid = live.get(p.user_id)
-        st = trips.user_stats(db, p.user)
+        st = stats[p.user_id]
         w.writerow([_pseudonym("u", p.user_id), p.programme, p.year, p.area, p.gender.value, int(p.women_only),
                     "|".join(p.methods or []), int(p.has_car), int(bool(p.has_bike)), len(sched),
                     *[sched.get(d, {}).get("in", "") for d in DAYS], int(cid is not None),
@@ -358,10 +374,11 @@ def evaluation(db: Session = Depends(get_db), _: User = Depends(admin_user)):
     before = {r.user_id: r.score for r in resp["spend_before"]}
     paired = [(before[r.user_id], r.score) for r in resp["spend_after"] if r.user_id in before and before[r.user_id] > 0]
     saving = [1 - a / b for b, a in paired]
-    stats = [trips.user_stats(db, u) for u in students]
+    by_user = trips.stats_for(db, students)
+    stats = [by_user[u.id] for u in students]
     rated = [s["trust"] for s in stats if s["went"] or s["ratings"]]
     est_saving = []
-    for u, s in zip(students, stats):
+    for s in stats:
         if s["went"] and s["paid"] and s["saved"]:
             est_saving.append(s["saved"] / (s["saved"] + s["paid"]))
     lat = [(u.approved_at - u.created_at).total_seconds() / 3600 for u in _students(db)

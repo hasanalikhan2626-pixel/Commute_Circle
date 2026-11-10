@@ -83,7 +83,8 @@ class User(Base):
     emergency_name: Mapped[str | None] = mapped_column(String(120))
     emergency_phone: Mapped[str | None] = mapped_column(String(20))
 
-    profile: Mapped[Profile | None] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
+    profile: Mapped[Profile | None] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan",
+                                                    lazy="joined")
     memberships: Mapped[list[CircleMember]] = relationship(back_populates="user", cascade="all, delete-orphan",
                                                            passive_deletes=True)
 
@@ -130,7 +131,7 @@ class Circle(Base):
     dissolved_reason: Mapped[str | None] = mapped_column(String(200))
 
     members: Mapped[list[CircleMember]] = relationship(back_populates="circle", cascade="all, delete-orphan",
-                                                       order_by="CircleMember.position")
+                                                       order_by="CircleMember.position", lazy="selectin")
     rota: Mapped[list[RotaEntry]] = relationship(back_populates="circle", cascade="all, delete-orphan",
                                                  order_by="RotaEntry.day")
 
@@ -147,7 +148,7 @@ class CircleMember(Base):
     joined_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     circle: Mapped[Circle] = relationship(back_populates="members")
-    user: Mapped[User] = relationship(back_populates="memberships")
+    user: Mapped[User] = relationship(back_populates="memberships", lazy="joined")
 
 
 class RotaEntry(Base):
@@ -190,7 +191,8 @@ class Trip(Base):
     fare_skipped: Mapped[bool] = mapped_column(Boolean, default=False)
     payer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
 
-    members: Mapped[list[TripMember]] = relationship(back_populates="trip", cascade="all, delete-orphan")
+    members: Mapped[list[TripMember]] = relationship(back_populates="trip", cascade="all, delete-orphan",
+                                                     lazy="selectin")
 
 
 class TripMember(Base):

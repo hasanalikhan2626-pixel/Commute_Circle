@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
@@ -21,14 +23,23 @@ def verify_password(p: str, h: str) -> bool:
     return _pwd.verify(p, h)
 
 
-def create_token(user_id: int) -> str:
+def password_stamp(password_hash: str) -> str:
+    """Short keyed fingerprint of the current password hash. Tokens carry it, so changing or
+    resetting the password signs out every other device at once."""
+    return hmac.new(settings.secret_key.encode(), password_hash.encode(), hashlib.sha256).hexdigest()[:16]
+
+
+def create_token(user_id: int, password_hash: str) -> str:
     exp = datetime.now(timezone.utc) + timedelta(minutes=settings.token_minutes)
-    return jwt.encode({"sub": str(user_id), "exp": exp}, settings.secret_key, algorithm=ALGORITHM)
+    return jwt.encode({"sub": str(user_id), "exp": exp, "pwd": password_stamp(password_hash)},
+                      settings.secret_key, algorithm=ALGORITHM)
 
 
-def decode_token(token: str) -> int | None:
+def decode_token(token: str) -> tuple[int, str] | None:
+    """(user id, password stamp), or None if the token is invalid or expired."""
     try:
-        return int(jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])["sub"])
+        data = jwt.decode(token, settings.secret_key, algorithms=[ALGORITHM])
+        return int(data["sub"]), str(data.get("pwd", ""))
     except (JWTError, KeyError, ValueError):
         return None
 

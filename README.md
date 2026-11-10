@@ -44,7 +44,7 @@ Every student is `first.last@bic.edu.pk` with the password `student123`.
 
 ```bash
 cd backend
-python -m pytest -q                       # 87 tests (SQLite)
+python -m pytest -q                       # 92 tests (SQLite)
 CC_DATABASE_URL=postgres://user:pass@localhost/db python -m pytest -q   # same suite on PostgreSQL
 python -m app.benchmark                   # compare the three matching algorithms
 python -m app.benchmark --prototype       # ... on the prototype's students

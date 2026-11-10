@@ -1,6 +1,7 @@
 """Student screens: Find my circle, Today, My circle, Money, My savings (prototype tabs)."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from statistics import median
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,13 +14,13 @@ from ..db import get_db
 from ..deps import current_user
 from ..matching.compat import (DAYS, DRIVE_MODES, METHODS, circle_fit, fit_label, group_days, pair_fit,
                               rider_detours_min, travel_modes)
-from ..models import (Absence, Circle, CircleStatus, Feedback, MemberStatus, Report, RotaEntry, SeatRequest,
-                      SeatStatus, Settlement, Trip, TripRating, TripStatus, User)
+from ..models import (Absence, Circle, CircleStatus, Feedback, Report, RotaEntry, SeatRequest,
+                      SeatStatus, Settlement, SosAlert, Trip, TripRating, TripStatus, User)
 from ..schemas import (AcceptIn, DayIn, FareIn, FeedbackIn, GoingIn, ModeIn, RateIn, ReportIn, RespondIn, SeatIn,
                        SettleIn, SosIn, SurveyIn, TripIn)
 from ..services import circles as svc
 from ..services import clock, rota, trips
-from ..services.candidates import LIVE, live_circles_of, rules_for, to_candidate
+from ..services.candidates import LIVE, live_circles_of, to_candidate
 
 router = APIRouter(prefix="/api", tags=["student"])
 CAMPUS = lambda: (settings.campus_lat, settings.campus_lng)  # noqa: E731
@@ -143,8 +144,7 @@ def find_accept(body: AcceptIn, user: User = Depends(current_user), db: Session 
 
 # --- My circle ---------------------------------------------------------------
 
-def _member_out(db, c: Circle, u: User, me: User, pickup: int, reveal: bool) -> dict:
-    st = trips.user_stats(db, u)
+def _member_out(c: Circle, u: User, me: User, pickup: int, reveal: bool, st: dict) -> dict:
     return {"user_id": u.id, "name": "You" if u.id == me.id else short(u.full_name), "full_name": u.full_name,
             "me": u.id == me.id, "programme": prog(u.profile), "year": u.profile.year, "area": u.profile.area,
             "phone": u.phone if reveal and u.id != me.id else None, "pickup": pickup,
@@ -157,7 +157,7 @@ def _member_out(db, c: Circle, u: User, me: User, pickup: int, reveal: bool) -> 
 def circle_out(db: Session, c: Circle, me: User) -> dict:
     live = [m for m in c.members if m.status in LIVE]
     users = {m.user_id: m.user for m in live}
-    order = trips.circle_route(c)["order"]
+    order = [u for u in trips.circle_route(c)["order"] if u in users]
     reveal = c.status == CircleStatus.active
     td = trips.travel_days(c)
     plan = {}
@@ -173,17 +173,20 @@ def circle_out(db: Session, c: Circle, me: User) -> dict:
             rota_rows.append({"day": e.day.isoformat(), "user_id": e.user_id,
                               "name": ("You" if u and u.id == me.id else short(u.full_name)) if u else None})
     mine = next(m for m in c.members if m.user_id == me.id)
+    stats = trips.stats_for(db, list(users.values()), money=False)
+    cost = trips.circle_cost(c) if len(live) >= 2 else None
+    route = trips.circle_route(c)
     return {
         "id": c.id, "status": c.status.value, "my_status": mine.status.value, "mode": c.mode,
         "modes": travel_modes(svc.group_of(c)) if len(live) >= 2 else [c.mode],
         "since": c.since.isoformat() if c.since else None, "fit": c.fit, "label": fit_label(c.fit),
-        "members": [_member_out(db, c, users[uid], me, n + 1, reveal) for n, uid in enumerate(order)],
+        "members": [_member_out(c, users[uid], me, n + 1, reveal, stats[uid]) for n, uid in enumerate(order)],
         "travel_days": td, "plan": plan, "rota": rota_rows,
-        "road_km": round(trips.circle_route(c)["road_km"], 1),
+        "road_km": round(route["road_km"], 1),
         "whatsapp_name": f"CommuteCircle · {short_area(live[0].user.profile.area)} → BIC" if live else "",
-        "share_hint": trips.circle_cost(c)["per_person"] if len(live) >= 2 else 0,
+        "share_hint": cost["per_person"] if cost else 0,
         "is_driver_mode": c.mode in DRIVE_MODES,
-        "cost": trips.circle_cost(c) if len(live) >= 2 else None,
+        "cost": cost,
         "detours": {str(k): round(v, 1) for k, v in rider_detours_min(
             [to_candidate(m.user.profile) for m in live], CAMPUS(), settings.road_factor, settings.avg_speed_kmh).items()}
         if len(live) >= 2 else {},
@@ -248,6 +251,11 @@ def feedback(body: FeedbackIn, user: User = Depends(current_user), db: Session =
         raise HTTPException(403, "You can only give feedback about members of your circle")
     if body.tag not in (trips.TAGS if body.up else trips.NEG_TAGS):
         raise HTTPException(422, "Pick one of the options")
+    since = datetime.now(timezone.utc) - timedelta(hours=20)
+    if db.scalar(select(Feedback.id).where(Feedback.from_id == user.id, Feedback.to_id == body.to_id,
+                                           Feedback.created_at >= since)):
+        # One a day per classmate: stops badge farming and repeated no-show marks.
+        raise HTTPException(409, "You've already given feedback about this classmate today")
     db.add(Feedback(from_id=user.id, to_id=body.to_id, circle_id=c.id, up=body.up, tag=body.tag))
     if not body.up and body.tag == "Didn’t turn up":
         trips.mark_noshow_from_feedback(db, c, body.to_id)
@@ -426,6 +434,9 @@ def seat_list(user: User = Depends(current_user), db: Session = Depends(get_db))
 def seat_request(body: SeatIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     own = my_circle(db, user, active_only=True)
     day = clock.today()
+    if db.scalar(select(SeatRequest.id).where(SeatRequest.user_id == user.id, SeatRequest.day == day,
+                                              SeatRequest.status.in_([SeatStatus.pending, SeatStatus.accepted]))):
+        raise HTTPException(409, "You already have a seat request for today. Cancel it first.")
     if body.circle_id not in [o["circle"].id for o in trips.seat_options(db, user, day, own)]:
         raise HTTPException(409, "That circle has no free seat for you today")
     db.add(SeatRequest(user_id=user.id, circle_id=body.circle_id, day=day))
@@ -523,13 +534,14 @@ def savings(user: User = Depends(current_user), db: Session = Depends(get_db)):
 
     st = trips.user_stats(db, user)
     past = clock.past_weekdays(20)
+    mine_q = select(TripMember.trip_id).where(TripMember.user_id == user.id, TripMember.status == TripStatus.went)
+    recent = db.scalars(select(Trip).where(Trip.id.in_(mine_q), Trip.confirmed_by.is_not(None), Trip.total > 0,
+                                           Trip.day >= past[0])).all()
     weeks = []
     for i in range(4):
         ws = set(past[i * 5:(i + 1) * 5])
         paid = solo_ = 0.0
-        q = select(TripMember, Trip).join(Trip).where(TripMember.user_id == user.id, TripMember.status == TripStatus.went,
-                                                      Trip.confirmed_by.is_not(None), Trip.total > 0)
-        for tm, t in db.execute(q):
+        for t in recent:
             mine = trips.share_of(t, user.id)
             if t.day in ws and mine is not None:
                 paid += mine
@@ -537,10 +549,11 @@ def savings(user: User = Depends(current_user), db: Session = Depends(get_db)):
         weeks.append({"label": f"Week {i + 1}", "paid": round(paid), "solo": round(solo_)})
     guide = []
     if user.profile.area:
+        shares = trips.fare_shares(db)
         for md in METHODS:
             if trips.rate_for(md) <= 0:
                 continue
-            v = trips.route_fares(db, user.profile.area, md)
+            v = trips.route_fares(db, user.profile.area, md, shares)
             guide.append({"mode": md, "n": len(v), "median": round(median(v)) if v else None,
                           "lo": round(min(v)) if v else None, "hi": round(max(v)) if v else None})
     return {"tiles": st, "weeks": weeks, "guide": guide, "area": user.profile.area,
@@ -549,15 +562,29 @@ def savings(user: User = Depends(current_user), db: Session = Depends(get_db)):
 
 # --- Safety: SOS and ratings ---------------------------------------------------
 
+def _sos_numbers() -> list[dict]:
+    import os
+
+    security = os.environ.get("CC_SECURITY_PHONE")
+    return ([{"label": "Police", "number": "15"}, {"label": "Rescue", "number": "1122"}]
+            + ([{"label": "BIC campus security", "number": security}] if security else []))
+
+
 @router.post("/sos", status_code=201)
 def sos(body: SosIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     """Alert Student Affairs (and, with WhatsApp set up, campus security and the student's
     emergency contact). The app also shows the emergency numbers to call."""
     import os
 
-    from ..models import SosAlert
     from ..services import notify
 
+    recent = db.scalar(select(SosAlert).where(SosAlert.user_id == user.id, SosAlert.handled.is_(False),
+                                              SosAlert.created_at >= datetime.now(timezone.utc) - timedelta(minutes=5)))
+    if recent:  # pressed again within 5 minutes: keep one alert, don't message everyone twice
+        if body.message:
+            recent.message = (recent.message + " | " if recent.message else "") + body.message
+            db.commit()
+        return {"alert_id": recent.id, "call": _sos_numbers()}
     c = my_circle(db, user)
     areas = [short_area(m.user.profile.area) for m in (c.members if c else []) if m.status in LIVE and m.user.profile]
     route = " → ".join(dict.fromkeys(areas)) + " → BIC campus" if areas else (user.profile.area or "")
@@ -569,9 +596,7 @@ def sos(body: SosIn, user: User = Depends(current_user), db: Session = Depends(g
     for to in filter(None, targets):
         notify.whatsapp(db, to, "cc_sos", params, user_id=user.id)
     db.commit()
-    security = os.environ.get("CC_SECURITY_PHONE")
-    return {"alert_id": alert.id, "call": [{"label": "Police", "number": "15"}, {"label": "Rescue", "number": "1122"}]
-            + ([{"label": "BIC campus security", "number": security}] if security else [])}
+    return {"alert_id": alert.id, "call": _sos_numbers()}
 
 
 @router.post("/today/rate", status_code=201)

@@ -182,7 +182,12 @@ h2 .badge{vertical-align:middle;margin-left:6px}
 .atabs a.active{color:var(--ink);border-bottom-color:var(--accent)}
 .brand:hover h1{color:var(--accent)}
 a.btn{text-decoration:none;display:inline-block}
-.btn.sos{background:var(--bad);border-color:var(--bad);color:#fff;text-align:center;text-decoration:none}
+/* SOS keeps one strong red in both themes: white text on the dark theme's pale red is unreadable */
+.btn.sos{background:#B4372B;border-color:#B4372B;color:#fff;text-align:center;text-decoration:none}
 .stars{display:inline-flex;gap:2px}.stars button{border:0;background:none;font-size:1.35rem;line-height:1;cursor:pointer;color:var(--line);padding:2px}
 .stars button.on{color:var(--sign)}
 .alarm{border:2px solid var(--bad);background:var(--bad-soft)}
+.link{min-height:32px;display:inline-flex;align-items:center}
+.why-list{display:none;margin:8px 0 0;padding:0;list-style:none}
+.why-list li{padding:8px 0;border-bottom:1px solid var(--line);font-size:.9rem}
+@media (max-width:560px){.why .scroll{display:none}.why-list{display:block}}

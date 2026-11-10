@@ -13,7 +13,7 @@ from ..config import settings
 from ..matching.algorithms import ALGORITHMS, options_for
 from ..matching.compat import circle_fit, feasible, travel_modes
 from ..matching.evaluate import evaluate
-from ..models import (Circle, CircleMember, CircleStatus, DeclinedPair, MatchRun, MemberStatus, Profile, User,
+from ..models import (Circle, CircleMember, CircleStatus, DeclinedPair, MatchRun, MemberStatus, User,
                       UserStatus)
 from . import clock, rota
 from .candidates import LIVE, live_circles_of, matching_pool, rules_for, to_candidate

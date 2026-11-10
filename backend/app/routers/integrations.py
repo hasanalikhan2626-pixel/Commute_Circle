@@ -90,7 +90,12 @@ async def receive(request: Request, x_hub_signature_256: str = Header(default=""
     body = await request.body()
     if not _signature_ok(body, x_hub_signature_256):
         raise HTTPException(403, "Bad signature")
-    data = json.loads(body or b"{}")
+    try:
+        data = json.loads(body or b"{}")
+    except ValueError as e:
+        raise HTTPException(400, "Body is not JSON") from e
+    if not isinstance(data, dict):
+        raise HTTPException(400, "Unexpected body")
     handled = 0
     for entry in data.get("entry", []):
         for change in entry.get("changes", []):

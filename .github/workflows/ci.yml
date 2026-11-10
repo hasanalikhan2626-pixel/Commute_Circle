@@ -17,6 +17,9 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: pip install -r backend/requirements.txt
+      - name: Lint
+        if: matrix.db == 'sqlite'
+        run: pip install ruff==0.8.4 && ruff check backend
       - name: Test
         working-directory: backend
         env:

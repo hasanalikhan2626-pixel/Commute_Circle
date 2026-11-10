@@ -218,6 +218,10 @@ function Explain({ g }) {
             {parts.map(([k, , max]) => <td key={k}>{m.fit_parts ? <span className="row" style={{ gap: 6, flexWrap: 'nowrap' }}><span className="mbar" style={{ width: 44 }}><i style={{ width: `${(m.fit_parts[k] / max) * 100}%` }} /></span><span className="mono">{m.fit_parts[k]}</span></span> : <span className="sub">you</span>}</td>)}
             <td className="mono">{m.detour_min ? `+${m.detour_min} min` : '—'}</td></tr>
         ))}</tbody></table></div>
+      <ul className="why-list">{g.members.filter((m) => m.fit_parts).map((m) => (
+        <li key={m.user_id}><b>{m.name}</b> · fit {m.fit_parts.total}/100<br />
+          <span className="sub">{parts.map(([k, l, max]) => `${l} ${m.fit_parts[k]}/${max}`).join(' · ')}{m.detour_min ? ` · detour +${m.detour_min} min` : ''}</span></li>
+      ))}</ul>
       <p className="hint" style={{ margin: '8px 0 4px' }}>Fit with you out of 100. Detour = extra minutes compared with going straight to campus (road distances from OpenStreetMap, peak traffic). No one's detour is over 12 minutes.</p>
       {g.costs.map((c) => <p key={c.mode} style={{ margin: '6px 0' }}><b>{c.mode}:</b> {c.text}</p>)}
       <p className="hint" style={{ margin: 0 }}>Pickup is at your area's centre point; we never use your address.</p>

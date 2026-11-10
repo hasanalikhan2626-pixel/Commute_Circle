@@ -25,7 +25,7 @@ import math
 import random
 import time
 
-from .compat import Rules, Scorer, travel_modes
+from .compat import Rules, Scorer
 from .types import Candidate, MatchResult
 
 MATCH_WEIGHT = 100.0

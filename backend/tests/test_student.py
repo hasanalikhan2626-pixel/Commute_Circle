@@ -65,7 +65,7 @@ def test_find_options_and_accept_flow(client):
 
 
 def test_accept_rechecks_availability(client):
-    a, b, x = student(client, 1), student(client, 2), student(client, 3)
+    a, _b, x = student(client, 1), student(client, 2), student(client, 3)
     opts_a = client.get("/api/find/options", headers=a).json()["options"]
     opts_x = client.get("/api/find/options", headers=x).json()["options"]
     client.post("/api/find/accept", json={"member_ids": opts_x[0]["member_ids"]}, headers=x)
@@ -329,3 +329,36 @@ def test_whatsapp_jobs_and_replies(client, admin, monkeypatch, db):
     assert client.get("/api/money", headers=hs[0]).json()["balance"] == 150
     out = client.get("/api/admin/outbox", headers=admin).json()["messages"]
     assert {m["template"] for m in out} >= {"cc_reminder", "cc_checkin", "cc_proposal", "text"}
+
+
+def test_abuse_limits(client, admin):
+    hs = [student(client, i, area="Gulshan-e-Iqbal Block 13") for i in range(1, 3)]
+    others = [student(client, i, area="Gulshan-e-Iqbal Block 10") for i in range(3, 5)]
+    third = [student(client, i, area="Gulshan-e-Iqbal Block 13") for i in range(5, 7)]
+    circle_of(client, hs, n=2)
+    circle_of(client, others, n=2)
+    circle_of(client, third, n=2)
+    target = me(client, hs[1])["id"]
+    # Feedback: once a day per classmate.
+    assert client.post("/api/circle/feedback", json={"to_id": target, "up": True, "tag": "Punctual"}, headers=hs[0]).status_code == 201
+    assert client.post("/api/circle/feedback", json={"to_id": target, "up": False, "tag": "Rude"}, headers=hs[0]).status_code == 409
+    # SOS pressed twice in a row is one alert.
+    a1 = client.post("/api/sos", json={"message": "first"}, headers=hs[0]).json()["alert_id"]
+    a2 = client.post("/api/sos", json={"message": "second"}, headers=hs[0]).json()["alert_id"]
+    sos = client.get("/api/admin/reports", headers=admin).json()["sos"]
+    assert a1 == a2 and len(sos) == 1 and sos[0]["message"] == "first | second"
+    # One live seat request a day.
+    seats = client.get("/api/seats", headers=hs[0]).json()
+    assert len(seats) >= 2
+    assert client.post("/api/seats", json={"circle_id": seats[0]["circle_id"]}, headers=hs[0]).status_code == 201
+    assert client.post("/api/seats", json={"circle_id": seats[1]["circle_id"]}, headers=hs[0]).status_code == 409
+
+
+def test_seat_offers_respect_vehicle_capacity(client):
+    full = [student(client, i, methods=("Rickshaw",)) for i in range(1, 4)]  # a rickshaw carries 3
+    c = circle_of(client, full)
+    assert c["mode"] == "Rickshaw" and len(c["members"]) == 3
+    lone = [student(client, i, area="Gulshan-e-Iqbal Block 10", methods=("Rickshaw",)) for i in range(4, 6)]
+    circle_of(client, lone, n=2)
+    seats = client.get("/api/seats", headers=lone[0]).json()
+    assert all(s["circle_id"] != c["id"] for s in seats), "a full rickshaw must not offer a seat"

@@ -1,0 +1,4 @@
+# Lint rules checked in CI: real errors (unused names, undefined names, syntax).
+line-length = 130
+[lint]
+select = ["F", "E9"]
